@@ -50,7 +50,8 @@ async function generateAudioAndUpload(text) {
     new gTTS(text, 'en').save(filePath, err => err ? reject(err) : resolve());
   });
   // upload
-  const result = await cloudinary.uploader.upload(filePath, { resource_type: 'auto' });
+  const result = await cloudinary.uploader.upload(filePath, { resource_type: 'raw' });
+  console.log('Uploaded audio to Cloudinary:', result.secure_url);
   // cleanup temp file
   fs.unlinkSync(filePath);
   return result.secure_url;
