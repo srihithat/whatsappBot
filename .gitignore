@@ -1,0 +1,18 @@
+# Environment variables
+.env
+
+# Dependencies
+node_modules/
+
+# Generated audio files
+public/*.mp3
+
+# Google Cloud credentials
+*.json
+
+# OS files
+.DS_Store
+
+# Logs
+*.log
+npm-debug.log*
