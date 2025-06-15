@@ -76,7 +76,7 @@ export default async function handler(req, res) {
       mediaUrl = null;
     }
     await client.messages.create({
-      from: `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER}`,
+      from: process.env.TWILIO_WHATSAPP_NUMBER, // full WhatsApp channel e.g. 'whatsapp:+14155238886'
       to: from,
       body: text,
       ...(mediaUrl ? { mediaUrl: [mediaUrl] } : {})
@@ -85,7 +85,7 @@ export default async function handler(req, res) {
   } catch (err) {
     console.error('Handler error:', err);
     await client.messages.create({
-      from: `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER}`,
+      from: process.env.TWILIO_WHATSAPP_NUMBER, // full WhatsApp channel e.g. 'whatsapp:+14155238886'
       to: from,
       body: 'Sorry, something went wrong. Please try again later.'
     });
