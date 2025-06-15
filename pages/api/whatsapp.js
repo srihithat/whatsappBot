@@ -18,6 +18,8 @@ const client = twilio(
   process.env.TWILIO_ACCOUNT_SID,
   process.env.TWILIO_AUTH_TOKEN
 );
+// Use MessagingResponse for sandbox webhook replies
+const MessagingResponse = twilio.twiml.MessagingResponse;
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY, timeout: 30000 });
 
 // Helper to call GROQ
@@ -63,39 +65,34 @@ async function parseBody(req) {
 }
 
 export default async function handler(req, res) {
-  // Debug environment variables
-  console.log('ENV:', {
-    sid: process.env.TWILIO_ACCOUNT_SID,
-    token: process.env.TWILIO_AUTH_TOKEN ? 'SET' : 'MISSING',
-    from: process.env.TWILIO_WHATSAPP_NUMBER
-  });
-  
   if (req.method === 'GET') return res.status(200).send('WhatsApp bot running');
   const params = await parseBody(req);
   const incoming = params.get('Body') || '';
   const from = params.get('From');
+
   try {
     const text = await getGroqResponse(incoming);
-    let mediaUrl;
+    let mediaUrl = null;
     try {
       mediaUrl = await generateAudioAndUpload(text);
     } catch {
       mediaUrl = null;
     }
-    await client.messages.create({
-      from: process.env.TWILIO_WHATSAPP_NUMBER, // full WhatsApp channel e.g. 'whatsapp:+14155238886'
-      to: from,
-      body: text,
-      ...(mediaUrl ? { mediaUrl: [mediaUrl] } : {})
-    });
-    return res.status(200).end();
+
+    // In sandbox, reply via TwiML
+    const twiml = new MessagingResponse();
+    twiml.message(text);
+    if (mediaUrl) {
+      twiml.message().media(mediaUrl);
+    }
+    res.writeHead(200, { 'Content-Type': 'text/xml' });
+    return res.end(twiml.toString());
   } catch (err) {
     console.error('Handler error:', err);
-    await client.messages.create({
-      from: process.env.TWILIO_WHATSAPP_NUMBER, // full WhatsApp channel e.g. 'whatsapp:+14155238886'
-      to: from,
-      body: 'Sorry, something went wrong. Please try again later.'
-    });
-    return res.status(200).end();
+    // Send fallback via TwiML
+    const twiml = new MessagingResponse();
+    twiml.message('Sorry, something went wrong. Please try again later.');
+    res.writeHead(500, { 'Content-Type': 'text/xml' });
+    return res.end(twiml.toString());
   }
 }
