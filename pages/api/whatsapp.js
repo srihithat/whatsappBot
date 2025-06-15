@@ -63,6 +63,13 @@ async function parseBody(req) {
 }
 
 export default async function handler(req, res) {
+  // Debug environment variables
+  console.log('ENV:', {
+    sid: process.env.TWILIO_ACCOUNT_SID,
+    token: process.env.TWILIO_AUTH_TOKEN ? 'SET' : 'MISSING',
+    from: process.env.TWILIO_WHATSAPP_NUMBER
+  });
+  
   if (req.method === 'GET') return res.status(200).send('WhatsApp bot running');
   const params = await parseBody(req);
   const incoming = params.get('Body') || '';
