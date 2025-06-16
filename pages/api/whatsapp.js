@@ -1,8 +1,8 @@
 import twilio from 'twilio';
 import { Groq } from "groq-sdk";
-import textToSpeech from '@google-cloud/text-to-speech';
-import { PollyClient, SynthesizeSpeechCommand } from '@aws-sdk/client-polly';
-import gTTS from 'gtts';
+// import textToSpeech from '@google-cloud/text-to-speech';
+// import { PollyClient, SynthesizeSpeechCommand } from '@aws-sdk/client-polly';
+// import gTTS from 'gtts';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
@@ -126,45 +126,43 @@ async function generateAudioAndUpload(text, language = 'en') {
   const filename = `audio_${Date.now()}.mp3`;
   const tmpDir = os.tmpdir();
   const filePath = path.join(tmpDir, filename);
-  // For non-English languages, use gTTS directly for better accent
+  // Use Sarvam.ai for Indian languages
   if (language !== 'en') {
-    console.log(`Using gTTS for ${language} to ensure proper accent`);
-    await new Promise((resolve, reject) => {
-      new gTTS(text, language).save(filePath, err => err ? reject(err) : resolve());
+    // Sarvam.ai TTS request
+    const res = await fetch('https://api.sarvam.ai/tts', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.SARVAM_API_KEY}`
+      },
+      body: JSON.stringify({ text, language })
     });
-    console.log(`gTTS generation success for ${language}`);
+    if (!res.ok) {
+      throw new Error(`Sarvam TTS failed: ${res.statusText}`);
+    }
+    const arrayBuf = await res.arrayBuffer();
+    fs.writeFileSync(filePath, Buffer.from(arrayBuf));
   } else {
+    // For English, you can uncomment and use previous logic below:
+    /*
+    // Original English TTS logic:
     // synthesize speech: try AWS Polly first, then Google Cloud TTS, fallback to gTTS
     try {
       const langCode = languageMap[language] || 'en-US';
-      const pollyParams = {
-        OutputFormat: 'mp3',
-        Text: text,
-        VoiceId: process.env.AWS_POLLY_VOICE_ID || 'Aditi',
-        LanguageCode: langCode
-      };
-      const pollyCommand = new SynthesizeSpeechCommand(pollyParams);
-      const pollyResponse = await pollyClient.send(pollyCommand);
-      // buffer and write
-      const chunks = [];
-      for await (const chunk of pollyResponse.AudioStream) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      const pollyParams = { OutputFormat: 'mp3', Text: text, VoiceId: process.env.AWS_POLLY_VOICE_ID || 'Aditi', LanguageCode: langCode };
+      const pollyCmd = new SynthesizeSpeechCommand(pollyParams);
+      const pollyRes = await pollyClient.send(pollyCmd);
+      const chunks = []; for await (const c of pollyRes.AudioStream) chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c));
       fs.writeFileSync(filePath, Buffer.concat(chunks));
-      console.log(`AWS Polly success for ${language}`);
     } catch (err) {
-      console.error(`AWS Polly failed for ${language}, falling back to GCP TTS:`, err);
       try {
-        const langCode = languageMap[language] || 'en-US';
-        const [response] = await ttsClient.synthesizeSpeech({ input: { text }, voice: { languageCode: langCode, ssmlGender: 'NEUTRAL' }, audioConfig: { audioEncoding: 'MP3' } });
-        fs.writeFileSync(filePath, response.audioContent, 'binary');
-        console.log(`GCP TTS success for ${language}`);
-      } catch (err) {
-        console.error(`GCP TTS failed for ${language}, falling back to gTTS:`, err);
-        await new Promise((resolve, reject) => {
-          new gTTS(text, language).save(filePath, err => err ? reject(err) : resolve());
-        });
-        console.log(`gTTS fallback success for ${language}`);
+        const [gcpResp] = await ttsClient.synthesizeSpeech({ input:{ text }, voice:{ languageCode: 'en-US', ssmlGender:'NEUTRAL' }, audioConfig:{ audioEncoding:'MP3' } });
+        fs.writeFileSync(filePath, gcpResp.audioContent, 'binary');
+      } catch {
+        new gTTS(text, language).save(filePath, () => {});
       }
     }
+    */
   }
   // upload audio privately as authenticated mp3
   const uploadResult = await cloudinary.uploader.upload(filePath, {
