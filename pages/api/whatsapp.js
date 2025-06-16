@@ -1,12 +1,14 @@
 import { v2 as cloudinary } from 'cloudinary';
-import db from '../../lib/db';
 import dotenv from 'dotenv';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import twilio from 'twilio';
 import { Groq } from "groq-sdk";
-import getRawBody from 'raw-body';
+import gTTS from 'gtts';
+
+// In-memory map to store each user's language preference (no persistence)
+const userLanguagePreference = new Map();
 
 // Load environment variables from .env file for local development
 dotenv.config();
@@ -102,84 +104,78 @@ async function generateAudioAndUpload(text, language = 'en') {
   const filename = `audio_${Date.now()}.mp3`;
   const tmpDir = os.tmpdir();
   const filePath = path.join(tmpDir, filename);
-  // Use Sarvam.ai with retry for Indian languages
-  if (language !== 'en') {
-    let lastErr = null;
-    // Use two-letter language code for Sarvam.ai
-    for (let i = 0; i < 2; i++) {
+  try {
+    // For non-English, try Sarvam.ai then fallback to gTTS
+    if (language !== 'en') {
       try {
-        const res = await fetch('https://api.sarvam.ai/tts', {
+        const locale = languageMap[language] || language;  // e.g., 'hi-IN'
+        const res = await fetch('https://api.sarvam.ai/text-to-speech', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${process.env.SARVAM_API_KEY}`
+            'api-subscription-key': process.env.SARVAM_API_KEY
           },
-          body: JSON.stringify({ text, language })
+          body: JSON.stringify({ text, target_language_code: locale })
         });
-        if (res.status === 404) {
-          console.warn(`Sarvam.ai TTS unsupported language: ${language}`);
-          return null;
+        if (res.ok) {
+          const arrayBuf = await res.arrayBuffer();
+          fs.writeFileSync(filePath, Buffer.from(arrayBuf));
+        } else {
+          throw new Error(`Sarvam TTS failed (${res.status}): ${res.statusText}`);
         }
-        if (!res.ok) throw new Error(`Sarvam TTS failed: ${res.statusText}`);
-        const arrayBuf = await res.arrayBuffer();
-        fs.writeFileSync(filePath, Buffer.from(arrayBuf));
-        lastErr = null;
-        break;
       } catch (err) {
-        console.warn(`Sarvam TTS attempt ${i+1} failed:`, err);
-        lastErr = err;
+        console.warn('Sarvam.ai TTS error, falling back to gTTS:', err);
+        await new Promise((resolve, reject) => {
+          new gTTS(text, language).save(filePath, (error) => {
+            if (error) reject(error);
+            else resolve();
+          });
+        });
       }
     }
-    if (lastErr) {
-      console.error('All Sarvam.ai TTS attempts failed:', lastErr);
-      return null;
-    }
+    // upload audio privately as authenticated mp3
+    const uploadResult = await cloudinary.uploader.upload(filePath, {
+      resource_type: 'video',
+      folder: 'whatsapp_audio',
+      use_filename: true,
+      unique_filename: false,
+      format: 'mp3',
+      type: 'authenticated'
+    });
+    const expiresAt = Math.floor(Date.now() / 1000) + 3600;
+    const signedUrl = cloudinary.url(uploadResult.public_id, {
+      resource_type: 'video',
+      format: 'mp3',
+      type: 'authenticated',
+      sign_url: true,
+      expires_at: expiresAt,
+      secure: true
+    });
+    // cleanup temp file
+    fs.unlinkSync(filePath);
+    return signedUrl;
+  } catch (e) {
+    console.error('Audio generation/upload error:', e);
+    // cleanup temp file if exists
+    try { fs.unlinkSync(filePath); } catch {}
+    return null;
   }
-  // upload audio privately as authenticated mp3
-  const uploadResult = await cloudinary.uploader.upload(filePath, {
-    resource_type: 'video',
-    folder: 'whatsapp_audio',
-    use_filename: true,
-    unique_filename: false,
-    format: 'mp3',
-    type: 'authenticated'
-  });
-  console.log('Cloudinary private upload result:', uploadResult.public_id);
-  // generate a signed, expiring URL (1 hour)
-  const expiresAt = Math.floor(Date.now() / 1000) + 3600;
-  const signedUrl = cloudinary.url(uploadResult.public_id, {
-    resource_type: 'video',
-    format: 'mp3',
-    type: 'authenticated',
-    sign_url: true,
-    expires_at: expiresAt,
-    secure: true
-  });
-  console.log('Signed streaming audio URL:', signedUrl);
-  // cleanup temp file
-  fs.unlinkSync(filePath);
-  return signedUrl;
 }
 
-// disable default body parser
-export const config = { api: { bodyParser: false } };
-// Parse raw request body using raw-body
-async function parseBody(req) {
-  const length = req.headers['content-length'];
-  const buf = await getRawBody(req, { length, limit: '1mb' });
-  return new URLSearchParams(buf.toString());
-}
+// Using Next.js default body parser for URL-encoded form data
+export const config = { api: { bodyParser: true } };
 
 export default async function handler(req, res) {
-  // Ensure database is loaded
-  await db.read();
-  // Initialize persistence object if missing
-  db.data ||= { userLang: {} };
+  console.log('Handler invoked, method:', req.method);
 
-  if (req.method === 'GET') return res.status(200).send('WhatsApp bot running');
-  const params = await parseBody(req);
-  const incoming = params.get('Body') || '';
-  const from = params.get('From');
+  if (req.method === 'GET') {
+    console.log('Health check');
+    return res.status(200).send('WhatsApp bot running');
+  }
+
+  // Extract Twilio form values from req.body
+  const incoming = (req.body.Body || '').trim();
+  const from = req.body.From;
   const incomingTextRaw = incoming.trim().toLowerCase();
 
   // Help command
@@ -196,8 +192,7 @@ export default async function handler(req, res) {
 
   // 1) Reset language if requested
   if (incomingTextRaw === 'change language') {
-    delete db.data.userLang[from];
-    await db.write();
+    userLanguagePreference.delete(from);
     const twimlReset = new MessagingResponse();
     twimlReset.message('Language cleared. Please select a new language.');
     res.setHeader('Content-Type', 'text/xml');
@@ -205,18 +200,17 @@ export default async function handler(req, res) {
   }
 
   // 2) If no saved preference, handle numeric selection or show menu
-  if (!db.data.userLang[from]) {
+  if (!userLanguagePreference.has(from)) {
      // try numeric selection
      const langKeys = Object.keys(languageNames);
      const num = parseInt(incomingTextRaw, 10);
      if (!isNaN(num) && num >= 1 && num <= langKeys.length) {
        const code = langKeys[num - 1];
-       db.data.userLang[from] = code;
-       await db.write();
-       const twimlSel = new MessagingResponse();
-       twimlSel.message(`Language set to ${languageNames[code]}`);
-       res.setHeader('Content-Type', 'text/xml');
-       return res.status(200).send(twimlSel.toString());
+        userLanguagePreference.set(from, code);
+        const twimlSel = new MessagingResponse();
+        twimlSel.message(`Language set to ${languageNames[code]}`);
+        res.setHeader('Content-Type', 'text/xml');
+        return res.status(200).send(twimlSel.toString());
      }
      // show menu
      const options = Object.entries(languageNames)
@@ -229,7 +223,8 @@ export default async function handler(req, res) {
      return res.status(200).send(twimlMenu.toString());
    }
    // 3) use saved preference
-   const lang = db.data.userLang[from] || 'en';
+   const lang = userLanguagePreference.get(from) || 'en';
+   console.log('Using language preference for', from, ':', lang);
    const incomingText = incoming;
 
    try {
@@ -250,6 +245,7 @@ export default async function handler(req, res) {
      const replyText = mediaUrl
        ? `${shortText}\n\n🔊 Listen here: ${mediaUrl}`
        : shortText;
+     console.log('Reply text:', replyText);
      twiml.message(replyText);
      console.log('Sending TwiML with media link:', twiml.toString());
      res.setHeader('Content-Type', 'text/xml');
