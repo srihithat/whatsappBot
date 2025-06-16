@@ -34,9 +34,10 @@ const MessagingResponse = twilio.twiml.MessagingResponse;
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY, timeout: 30000 });
 
 // Google TTS client and language mappings
-// Initialize Google TTS client with explicit credentials file (set GOOGLE_APPLICATION_CREDENTIALS env var)
+// Initialize Google TTS client using credentials JSON from env var
+const ttsCredentials = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON || '{}');
 const ttsClient = new textToSpeech.TextToSpeechClient({
-  keyFilename: process.env.GOOGLE_APPLICATION_CREDENTIALS
+  credentials: ttsCredentials
 });
 const languageMap = {
   en: 'en-US', hi: 'hi-IN', ta: 'ta-IN', bn: 'bn-IN', mr: 'mr-IN', ml: 'ml-IN'
