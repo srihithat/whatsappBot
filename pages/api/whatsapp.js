@@ -105,7 +105,7 @@ async function generateAudioAndUpload(text, language = 'en') {
   // Use Sarvam.ai with retry for Indian languages
   if (language !== 'en') {
     let lastErr = null;
-    const locale = languageMap[language] || language;
+    // Use two-letter language code for Sarvam.ai
     for (let i = 0; i < 2; i++) {
       try {
         const res = await fetch('https://api.sarvam.ai/tts', {
@@ -114,10 +114,10 @@ async function generateAudioAndUpload(text, language = 'en') {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${process.env.SARVAM_API_KEY}`
           },
-          body: JSON.stringify({ text, language: locale })
+          body: JSON.stringify({ text, language })
         });
         if (res.status === 404) {
-          console.warn(`Sarvam.ai TTS unsupported locale: ${locale}`);
+          console.warn(`Sarvam.ai TTS unsupported language: ${language}`);
           return null;
         }
         if (!res.ok) throw new Error(`Sarvam TTS failed: ${res.statusText}`);
