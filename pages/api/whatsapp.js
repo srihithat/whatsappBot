@@ -33,12 +33,19 @@ const client = twilio(
 const MessagingResponse = twilio.twiml.MessagingResponse;
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY, timeout: 30000 });
 
+// Parse language prefix like 'hi: question' to extract lang code and text
+function parseLanguagePref(raw) {
+  const m = raw.match(/^([a-z]{2}):\s*(.*)/i);
+  if (m) return { lang: m[1].toLowerCase(), text: m[2] };
+  return { lang: 'en', text: raw };
+}
+
 // Helper to call GROQ
-async function getGroqResponse(message) {
+async function getGroqResponse(message, language = 'en') {
   const completion = await Promise.race([
     groq.chat.completions.create({
       messages: [
-        { role: "system", content: "You are an expert in Indian mythology. Provide brief, engaging 2-3 sentence explanations." },
+        { role: "system", content: `You are an expert in Indian mythology. Provide brief, engaging 2-3 sentence explanations in ${language}.` },
         { role: "user", content: `Tell me about this Indian mythology topic: ${message}` }
       ],
       model: "llama-3.3-70b-versatile",
@@ -52,11 +59,11 @@ async function getGroqResponse(message) {
 }
 
 // Helper to fetch a detailed response for audio (longer form)
-async function getGroqLongResponse(message) {
+async function getGroqLongResponse(message, language = 'en') {
   const completion = await Promise.race([
     groq.chat.completions.create({
       messages: [
-        { role: "system", content: "You are an expert in Indian mythology. Provide a detailed explanation in 2-3 paragraphs, rich with context and storytelling." },
+        { role: "system", content: `You are an expert in Indian mythology. Provide a detailed explanation in 2-3 paragraphs in ${language}, rich with context and storytelling.` },
         { role: "user", content: `Please provide a more detailed answer for: ${message}` }
       ],
       model: "llama-3.3-70b-versatile",
@@ -70,13 +77,13 @@ async function getGroqLongResponse(message) {
 }
 
 // Generate audio file in tmp and upload to Cloudinary
-async function generateAudioAndUpload(text) {
+async function generateAudioAndUpload(text, language = 'en') {
   const filename = `audio_${Date.now()}.mp3`;
   const tmpDir = os.tmpdir();
   const filePath = path.join(tmpDir, filename);
   // generate
   await new Promise((resolve, reject) => {
-    new gTTS(text, 'en').save(filePath, err => err ? reject(err) : resolve());
+    new gTTS(text, language).save(filePath, err => err ? reject(err) : resolve());
   });
   // upload audio privately as authenticated mp3
   const uploadResult = await cloudinary.uploader.upload(filePath, {
@@ -118,14 +125,17 @@ export default async function handler(req, res) {
   const incoming = params.get('Body') || '';
   const from = params.get('From');
 
+  // extract language and clean text
+  const { lang, text: incomingText } = parseLanguagePref(incoming);
+
   try {
     // Fetch short text for chat and detailed text for audio
-    const shortText = await getGroqResponse(incoming);
+    const shortText = await getGroqResponse(incomingText, lang);
     let mediaUrl = null;
     try {
-      console.log('Generating detailed audio response...');
-      const longText = await getGroqLongResponse(incoming);
-      mediaUrl = await generateAudioAndUpload(longText);
+      console.log('Generating detailed audio response in', lang);
+      const longText = await getGroqLongResponse(incomingText, lang);
+      mediaUrl = await generateAudioAndUpload(longText, lang);
       console.log('Generated audio URL from long response:', mediaUrl);
     } catch (err) {
       console.error('Error generating/uploading audio:', err);
