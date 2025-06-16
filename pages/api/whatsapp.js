@@ -221,6 +221,7 @@ export default async function handler(req, res) {
     await client.messages.create({
       from: process.env.TWILIO_WHATSAPP_NUMBER,
       to: from,
+      body: 'Please select your new preferred language:',
       interactive: {
         type: 'list',
         body: { text: 'Please select your new preferred language:' },
@@ -237,6 +238,7 @@ export default async function handler(req, res) {
     await client.messages.create({
       from: process.env.TWILIO_WHATSAPP_NUMBER,
       to: from,
+      body: 'Please select your preferred language:',
       interactive: {
         type: 'list',
         body: { text: 'Please select your preferred language:' },
