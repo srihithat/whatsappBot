@@ -51,6 +51,24 @@ async function getGroqResponse(message) {
   return completion.choices[0].message.content;
 }
 
+// Helper to fetch a detailed response for audio (longer form)
+async function getGroqLongResponse(message) {
+  const completion = await Promise.race([
+    groq.chat.completions.create({
+      messages: [
+        { role: "system", content: "You are an expert in Indian mythology. Provide a detailed explanation in 2-3 paragraphs, rich with context and storytelling." },
+        { role: "user", content: `Please provide a more detailed answer for: ${message}` }
+      ],
+      model: "llama-3.3-70b-versatile",
+      temperature: 0.8,
+      max_tokens: 600,
+      top_p: 1,
+    }),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('GROQ long request timeout')), 45000))
+  ]);
+  return completion.choices[0].message.content;
+}
+
 // Generate audio file in tmp and upload to Cloudinary
 async function generateAudioAndUpload(text) {
   const filename = `audio_${Date.now()}.mp3`;
@@ -101,24 +119,24 @@ export default async function handler(req, res) {
   const from = params.get('From');
 
   try {
-    const text = await getGroqResponse(incoming);
+    // Fetch short text for chat and detailed text for audio
+    const shortText = await getGroqResponse(incoming);
     let mediaUrl = null;
     try {
-      console.log('Generating audio for text:', text);
-      mediaUrl = await generateAudioAndUpload(text);
-      console.log('Generated audio URL:', mediaUrl);
+      console.log('Generating detailed audio response...');
+      const longText = await getGroqLongResponse(incoming);
+      mediaUrl = await generateAudioAndUpload(longText);
+      console.log('Generated audio URL from long response:', mediaUrl);
     } catch (err) {
       console.error('Error generating/uploading audio:', err);
-      mediaUrl = null;
     }
 
-    // In sandbox, reply via TwiML with text and link/media together
+    // In sandbox, reply via TwiML: short text plus audio link
     const twiml = new MessagingResponse();
     if (mediaUrl) {
-      // Send text with signed streaming URL instead of media attachment
-      twiml.message(`${text}\n\n🔊 Listen here: ${mediaUrl}`);
+      twiml.message(`${shortText}\n\n🔊 Listen here: ${mediaUrl}`);
     } else {
-      twiml.message(text);
+      twiml.message(shortText);
     }
     console.log('Sending TwiML with media link:', twiml.toString());
     res.writeHead(200, { 'Content-Type': 'text/xml' });
