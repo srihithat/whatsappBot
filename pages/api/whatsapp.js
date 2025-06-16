@@ -42,6 +42,7 @@ const languageMap = {
 
 // Helper to send WhatsApp messages
 async function sendMessage(to, body) {
+  console.log('sendMessage() to=', to, 'body=', body);
   await fetch(`https://graph.facebook.com/v17.0/${PHONE_ID}/messages`, {
     method: 'POST',
     headers: {
@@ -118,6 +119,7 @@ async function generateAudioAndUpload(text, language = 'en') {
 }
 
 export default async function handler(req, res) {
+  console.log('Handler start:', req.method, 'url:', req.url);
   if (req.method === 'GET') {
     // Webhook verification
     const mode = req.query['hub.mode'];
@@ -133,9 +135,14 @@ export default async function handler(req, res) {
     return res.status(200).send('WhatsApp bot running');
   }
   if (req.method === 'POST') {
+    console.log('Handler POST, body:', JSON.stringify(req.body));
     const entry = req.body.entry?.[0];
     const msg = entry?.changes?.[0]?.value?.messages?.[0];
-    if (!msg) return res.status(200).send('no message');
+    if (!msg) {
+      console.log('No message in webhook payload');
+      return res.status(200).send('no message');
+    }
+    console.log('Received message:', msg);
     const from = msg.from; const text = msg.text?.body || '';
     const raw = text.trim().toLowerCase();
     // Reset
