@@ -1,29 +1,14 @@
-import twilio from 'twilio';
-import { Groq } from "groq-sdk";
-// import textToSpeech from '@google-cloud/text-to-speech';
-// import { PollyClient, SynthesizeSpeechCommand } from '@aws-sdk/client-polly';
-// import gTTS from 'gtts';
-import path from 'path';
+import { v2 as cloudinary } from 'cloudinary';
+import db from '../../lib/db';
+import dotenv from 'dotenv';
 import fs from 'fs';
 import os from 'os';
-import { v2 as cloudinary } from 'cloudinary';
-import dotenv from 'dotenv';
+import path from 'path';
+import twilio from 'twilio';
+import { Groq } from "groq-sdk";
 
 // Load environment variables from .env file for local development
 dotenv.config();
-
-// In-memory map to store each user's language preference (resets on cold start)
-const userLanguagePreference = new Map();
-
-// Human-readable names for supported languages
-const languageNames = {
-  en: 'English', hi: 'Hindi', ta: 'Tamil', bn: 'Bengali', mr: 'Marathi', ml: 'Malayalam',
-  te: 'Telugu', pa: 'Punjabi', gu: 'Gujarati', kn: 'Kannada', or: 'Odia', ur: 'Urdu',
-  as: 'Assamese', ne: 'Nepali', sa: 'Sanskrit'
-};
-
-// Initialize AWS Polly client
-// const pollyClient = new PollyClient({ region: process.env.AWS_REGION });  // AWS Polly disabled
 
 // Configure Cloudinary
 cloudinary.config({
@@ -48,30 +33,14 @@ const client = twilio(
 const MessagingResponse = twilio.twiml.MessagingResponse;
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY, timeout: 30000 });
 
-// Commenting out GCP TTS credential initialization (no longer used)
-// Google TTS client and language mappings
-/*
-let ttsClient;
-if (process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) {
-  try {
-    const creds = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
-    ttsClient = new textToSpeech.TextToSpeechClient({ credentials: creds });
-    console.log('TTS client initialized with JSON credentials.');
-  } catch (e) {
-    console.error('Invalid JSON in GOOGLE_APPLICATION_CREDENTIALS_JSON:', e);
-  }
-}
-if (!ttsClient && process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-  // fallback to keyFilename path
-  ttsClient = new textToSpeech.TextToSpeechClient({ keyFilename: process.env.GOOGLE_APPLICATION_CREDENTIALS });
-  console.log('TTS client initialized with keyFilename from env.');
-}
-if (!ttsClient) {
-  // fallback to Application Default Credentials
-  ttsClient = new textToSpeech.TextToSpeechClient();
-  console.log('TTS client initialized with default credentials.');
-}
-*/
+// Human-readable names for supported languages
+const languageNames = {
+  en: 'English', hi: 'Hindi', ta: 'Tamil', bn: 'Bengali', mr: 'Marathi', ml: 'Malayalam',
+  te: 'Telugu', pa: 'Punjabi', gu: 'Gujarati', kn: 'Kannada', or: 'Odia', ur: 'Urdu',
+  as: 'Assamese', ne: 'Nepali', sa: 'Sanskrit'
+};
+
+// Map for language codes used in Sarvam.ai TTS API
 const languageMap = {
   en: 'en-US',
   hi: 'hi-IN',
@@ -90,13 +59,6 @@ const languageMap = {
   sa: 'sa-IN'  // Sanskrit
 };
 console.log('Supported languageMap:', languageMap);
-
-// Parse language prefix like 'hi: question' to extract lang code and text
-function parseLanguagePref(raw) {
-  const m = raw.match(/^([a-z]{2}):\s*(.*)/i);
-  if (m) return { lang: m[1].toLowerCase(), text: m[2] };
-  return { lang: 'en', text: raw };
-}
 
 // Helper to call GROQ
 async function getGroqResponse(message, language = 'en') {
@@ -139,38 +101,33 @@ async function generateAudioAndUpload(text, language = 'en') {
   const filename = `audio_${Date.now()}.mp3`;
   const tmpDir = os.tmpdir();
   const filePath = path.join(tmpDir, filename);
-  // Use Sarvam.ai for Indian languages
+  // Use Sarvam.ai with retry for Indian languages
   if (language !== 'en') {
-    // Sarvam.ai TTS request
-    const res = await fetch('https://api.sarvam.ai/tts', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.SARVAM_API_KEY}`
-      },
-      body: JSON.stringify({ text, language })
-    });
-    if (!res.ok) {
-      throw new Error(`Sarvam TTS failed: ${res.statusText}`);
+    let lastErr;
+    for (let i = 0; i < 2; i++) {
+      try {
+        const res = await fetch('https://api.sarvam.ai/tts', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${process.env.SARVAM_API_KEY}`
+          },
+          body: JSON.stringify({ text, language })
+        });
+        if (!res.ok) throw new Error(`Sarvam TTS failed: ${res.statusText}`);
+        const arrayBuf = await res.arrayBuffer();
+        fs.writeFileSync(filePath, Buffer.from(arrayBuf));
+        lastErr = null;
+        break;
+      } catch (err) {
+        console.warn(`Sarvam TTS attempt ${i+1} failed:`, err);
+        lastErr = err;
+      }
     }
-    const arrayBuf = await res.arrayBuffer();
-    fs.writeFileSync(filePath, Buffer.from(arrayBuf));
-  } else {
-    // For English, you can uncomment and use previous logic below:
-    /*
-    // Original English TTS logic:
-    // synthesize speech: try AWS Polly first, then Google Cloud TTS, fallback to gTTS
-    try {
-      const langCode = languageMap[language] || 'en-US';
-      const pollyParams = { OutputFormat: 'mp3', Text: text, VoiceId: process.env.AWS_POLLY_VOICE_ID || 'Aditi', LanguageCode: langCode };
-      const pollyCmd = new SynthesizeSpeechCommand(pollyParams);
-      const pollyRes = await pollyClient.send(pollyCmd);
-      const chunks = []; for await (const c of pollyRes.AudioStream) chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c));
-      fs.writeFileSync(filePath, Buffer.concat(chunks));
-    } catch (err) {
-      new gTTS(text, language).save(filePath, () => {});
+    if (lastErr) {
+      console.error('All Sarvam.ai TTS attempts failed:', lastErr);
+      throw lastErr;
     }
-    */
   }
   // upload audio privately as authenticated mp3
   const uploadResult = await cloudinary.uploader.upload(filePath, {
@@ -207,69 +164,95 @@ async function parseBody(req) {
 }
 
 export default async function handler(req, res) {
+  // Ensure database is loaded
+  await db.read();
+  // Initialize persistence object if missing
+  db.data ||= { userLang: {} };
+
   if (req.method === 'GET') return res.status(200).send('WhatsApp bot running');
   const params = await parseBody(req);
   const incoming = params.get('Body') || '';
   const from = params.get('From');
-
   const incomingTextRaw = incoming.trim().toLowerCase();
-  // Allow user to reset language at any time by sending 'change language'
+
+  // Help command
+  if (incomingTextRaw === 'help' || incomingTextRaw === 'menu') {
+    const options = Object.entries(languageNames)
+      .map(([code, name], idx) => `${idx + 1}. ${name}`)
+      .join('\n');
+    const helpText = `Welcome to the Indian Mythology Bot!\n- Select language by number:\n${options}\n- Ask any question to get answers in your language.\n- Type 'change language' to switch.\n- Type 'help' to see this message.`;
+    const twimlHelp = new MessagingResponse();
+    twimlHelp.message(helpText);
+    res.setHeader('Content-Type', 'text/xml');
+    return res.status(200).send(twimlHelp.toString());
+  }
+
+  // 1) Reset language if requested
   if (incomingTextRaw === 'change language') {
-    userLanguagePreference.delete(from);
+    delete db.data.userLang[from];
+    await db.write();
+    const twimlReset = new MessagingResponse();
+    twimlReset.message('Language cleared. Please select a new language.');
+    res.setHeader('Content-Type', 'text/xml');
+    return res.status(200).send(twimlReset.toString());
   }
-  // On first interaction or after reset, show language selection menu
-  if (!userLanguagePreference.has(from)) {
-    const options = Object.entries(languageNames).map(([code, name], idx) => `${idx+1}. ${name}`).join('\n');
-    const menuText = `Please select your language by replying with the number:\n${options}`;
-    const twiml = new MessagingResponse();
-    twiml.message(menuText);
-    res.writeHead(200, { 'Content-Type': 'text/xml' });
-    return res.end(twiml.toString());
-  }
-  // Handle numeric selection
-  const pref = userLanguagePreference.get(from);
-  const langKeys = Object.keys(languageNames);
-  const num = parseInt(incomingTextRaw, 10);
-  if (!pref && !isNaN(num) && num >=1 && num <= langKeys.length) {
-    const code = langKeys[num-1];
-    userLanguagePreference.set(from, code);
-    const twiml = new MessagingResponse();
-    twiml.message(`Language set to ${languageNames[code]}`);
-    res.writeHead(200, { 'Content-Type': 'text/xml' });
-    return res.end(twiml.toString());
-  }
-  // Use previously selected language or default to English
-  const lang = userLanguagePreference.get(from) || 'en';
-  const incomingText = incoming;
 
-  try {
-    // Fetch short text for chat and detailed text for audio in selected language
-    const shortText = await getGroqResponse(incomingText, lang);
-    let mediaUrl = null;
-    try {
-      console.log('Generating detailed audio response in', lang);
-      const longText = await getGroqLongResponse(incomingText, lang);
-      mediaUrl = await generateAudioAndUpload(longText, lang);
-      console.log('Generated audio URL from long response:', mediaUrl);
-    } catch (err) {
-      console.error('Error generating/uploading audio:', err);
-    }
+  // 2) If no saved preference, handle numeric selection or show menu
+  if (!db.data.userLang[from]) {
+     // try numeric selection
+     const langKeys = Object.keys(languageNames);
+     const num = parseInt(incomingTextRaw, 10);
+     if (!isNaN(num) && num >= 1 && num <= langKeys.length) {
+       const code = langKeys[num - 1];
+       db.data.userLang[from] = code;
+       await db.write();
+       const twimlSel = new MessagingResponse();
+       twimlSel.message(`Language set to ${languageNames[code]}`);
+       res.setHeader('Content-Type', 'text/xml');
+       return res.status(200).send(twimlSel.toString());
+     }
+     // show menu
+     const options = Object.entries(languageNames)
+       .map(([code, name], idx) => `${idx + 1}. ${name}`)
+       .join('\n');
+     const menuText = `Please select your language by replying with the number:\n${options}`;
+     const twimlMenu = new MessagingResponse();
+     twimlMenu.message(menuText);
+     res.setHeader('Content-Type', 'text/xml');
+     return res.status(200).send(twimlMenu.toString());
+   }
+   // 3) use saved preference
+   const lang = db.data.userLang[from] || 'en';
+   const incomingText = incoming;
 
-    // In sandbox, reply via TwiML: concise text with audio link only
-    const twiml = new MessagingResponse();
-    const replyText = mediaUrl
-      ? `${shortText}\n\n🔊 Listen here: ${mediaUrl}`
-      : shortText;
-    twiml.message(replyText);
-    console.log('Sending TwiML with media link:', twiml.toString());
-    res.writeHead(200, { 'Content-Type': 'text/xml' });
-    return res.end(twiml.toString());
-  } catch (err) {
-    console.error('Handler error:', err);
-    // Send fallback via TwiML
-    const twiml = new MessagingResponse();
-    twiml.message('Sorry, something went wrong. Please try again later.');
-    res.writeHead(500, { 'Content-Type': 'text/xml' });
-    return res.end(twiml.toString());
-  }
+   try {
+     // Fetch short text for chat and detailed text for audio in selected language
+     const shortText = await getGroqResponse(incomingText, lang);
+     let mediaUrl = null;
+     try {
+       console.log('Generating detailed audio response in', lang);
+       const longText = await getGroqLongResponse(incomingText, lang);
+       mediaUrl = await generateAudioAndUpload(longText, lang);
+       console.log('Generated audio URL from long response:', mediaUrl);
+     } catch (err) {
+       console.error('Error generating/uploading audio:', err);
+     }
+
+     // In sandbox, reply via TwiML: concise text with audio link only
+     const twiml = new MessagingResponse();
+     const replyText = mediaUrl
+       ? `${shortText}\n\n🔊 Listen here: ${mediaUrl}`
+       : shortText;
+     twiml.message(replyText);
+     console.log('Sending TwiML with media link:', twiml.toString());
+     res.setHeader('Content-Type', 'text/xml');
+     return res.status(200).send(twiml.toString());
+   } catch (err) {
+     console.error('Handler error:', err);
+     // Send fallback via TwiML
+     const twiml = new MessagingResponse();
+     twiml.message('Sorry, something went wrong. Please try again later.');
+     res.setHeader('Content-Type', 'text/xml');
+     return res.status(500).send(twiml.toString());
+   }
 }
