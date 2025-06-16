@@ -48,8 +48,9 @@ const client = twilio(
 const MessagingResponse = twilio.twiml.MessagingResponse;
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY, timeout: 30000 });
 
-// Comment out GCP TTS client setup since using Sarvam.ai for non-English
+// Commenting out GCP TTS credential initialization (no longer used)
 // Google TTS client and language mappings
+/*
 let ttsClient;
 if (process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) {
   try {
@@ -70,6 +71,7 @@ if (!ttsClient) {
   ttsClient = new textToSpeech.TextToSpeechClient();
   console.log('TTS client initialized with default credentials.');
 }
+*/
 const languageMap = {
   en: 'en-US',
   hi: 'hi-IN',
@@ -166,12 +168,7 @@ async function generateAudioAndUpload(text, language = 'en') {
       const chunks = []; for await (const c of pollyRes.AudioStream) chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c));
       fs.writeFileSync(filePath, Buffer.concat(chunks));
     } catch (err) {
-      try {
-        const [gcpResp] = await ttsClient.synthesizeSpeech({ input:{ text }, voice:{ languageCode: 'en-US', ssmlGender:'NEUTRAL' }, audioConfig:{ audioEncoding:'MP3' } });
-        fs.writeFileSync(filePath, gcpResp.audioContent, 'binary');
-      } catch {
-        new gTTS(text, language).save(filePath, () => {});
-      }
+      new gTTS(text, language).save(filePath, () => {});
     }
     */
   }
