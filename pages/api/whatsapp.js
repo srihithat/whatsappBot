@@ -213,45 +213,28 @@ export default async function handler(req, res) {
   const from = params.get('From');
 
   const incomingTextRaw = incoming.trim().toLowerCase();
-  // Allow user to reset language at any time
+  // Allow user to reset language at any time by sending 'change language'
   if (incomingTextRaw === 'change language') {
     userLanguagePreference.delete(from);
-    // Send language selection list again
-    const rowsReset = Object.entries(languageNames).map(([code, name]) => ({ id: code, title: name }));
-    await client.messages.create({
-      from: process.env.TWILIO_WHATSAPP_NUMBER,
-      to: from,
-      body: 'Please select your new preferred language:',
-      interactive: {
-        type: 'list',
-        body: { text: 'Please select your new preferred language:' },
-        action: { button: 'Select Language', sections: [{ title: 'Languages', rows: rowsReset }] }
-      }
-    });
-    return res.status(200).send('');
   }
-  
-  // On first interaction or unrecognized code, show language list
-  if (!userLanguagePreference.has(from) && !languageMap[incomingTextRaw]) {
-    // Build sections for list message
-    const rows = Object.entries(languageNames).map(([code, name]) => ({ id: code, title: name }));
-    await client.messages.create({
-      from: process.env.TWILIO_WHATSAPP_NUMBER,
-      to: from,
-      body: 'Please select your preferred language:',
-      interactive: {
-        type: 'list',
-        body: { text: 'Please select your preferred language:' },
-        action: { button: 'Select Language', sections: [{ title: 'Languages', rows }] }
-      }
-    });
-    return res.status(200).send('');
-  }
-  // Now detect if incoming is a language code
-  if (languageMap[incomingTextRaw]) {
-    userLanguagePreference.set(from, incomingTextRaw);
+  // On first interaction or after reset, show language selection menu
+  if (!userLanguagePreference.has(from)) {
+    const options = Object.entries(languageNames).map(([code, name], idx) => `${idx+1}. ${name}`).join('\n');
+    const menuText = `Please select your language by replying with the number:\n${options}`;
     const twiml = new MessagingResponse();
-    twiml.message(`Language set to ${languageNames[incomingTextRaw]}`);
+    twiml.message(menuText);
+    res.writeHead(200, { 'Content-Type': 'text/xml' });
+    return res.end(twiml.toString());
+  }
+  // Handle numeric selection
+  const pref = userLanguagePreference.get(from);
+  const langKeys = Object.keys(languageNames);
+  const num = parseInt(incomingTextRaw, 10);
+  if (!pref && !isNaN(num) && num >=1 && num <= langKeys.length) {
+    const code = langKeys[num-1];
+    userLanguagePreference.set(from, code);
+    const twiml = new MessagingResponse();
+    twiml.message(`Language set to ${languageNames[code]}`);
     res.writeHead(200, { 'Content-Type': 'text/xml' });
     return res.end(twiml.toString());
   }
