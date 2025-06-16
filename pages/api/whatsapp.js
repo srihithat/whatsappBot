@@ -50,8 +50,13 @@ async function generateAudioAndUpload(text) {
     new gTTS(text, 'en').save(filePath, err => err ? reject(err) : resolve());
   });
   // upload
-  const result = await cloudinary.uploader.upload(filePath, { resource_type: 'raw' });
-  console.log('Uploaded audio to Cloudinary:', result.secure_url);
+  const result = await cloudinary.uploader.upload(filePath, {
+    resource_type: 'raw',
+    folder: 'whatsapp_audio',
+    use_filename: true,
+    unique_filename: false
+  });
+  console.log('Cloudinary upload result:', result);
   // cleanup temp file
   fs.unlinkSync(filePath);
   return result.secure_url;
@@ -82,10 +87,12 @@ export default async function handler(req, res) {
 
     // In sandbox, reply via TwiML
     const twiml = new MessagingResponse();
-    twiml.message(text);
+    const msg = twiml.message();
+    msg.body(text);
     if (mediaUrl) {
-      twiml.message().media(mediaUrl);
+      msg.media(mediaUrl);
     }
+    console.log('Sending TwiML:', twiml.toString());
     res.writeHead(200, { 'Content-Type': 'text/xml' });
     return res.end(twiml.toString());
   } catch (err) {
