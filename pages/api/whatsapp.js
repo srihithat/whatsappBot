@@ -23,7 +23,7 @@ const languageNames = {
 };
 
 // Initialize AWS Polly client
-const pollyClient = new PollyClient({ region: process.env.AWS_REGION });
+// const pollyClient = new PollyClient({ region: process.env.AWS_REGION });  // AWS Polly disabled
 
 // Configure Cloudinary
 cloudinary.config({
