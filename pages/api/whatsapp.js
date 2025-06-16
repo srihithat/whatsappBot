@@ -49,14 +49,15 @@ async function generateAudioAndUpload(text) {
   await new Promise((resolve, reject) => {
     new gTTS(text, 'en').save(filePath, err => err ? reject(err) : resolve());
   });
-  // upload
+  // upload audio as mp3 so secure_url ends with .mp3
   const result = await cloudinary.uploader.upload(filePath, {
-    resource_type: 'raw',
+    resource_type: 'video',
     folder: 'whatsapp_audio',
     use_filename: true,
-    unique_filename: false
+    unique_filename: false,
+    format: 'mp3'
   });
-  console.log('Cloudinary upload result:', result);
+  console.log('Cloudinary upload secure_url:', result.secure_url);
   // cleanup temp file
   fs.unlinkSync(filePath);
   return result.secure_url;
@@ -80,19 +81,23 @@ export default async function handler(req, res) {
     const text = await getGroqResponse(incoming);
     let mediaUrl = null;
     try {
+      console.log('Generating audio for text:', text);
       mediaUrl = await generateAudioAndUpload(text);
-    } catch {
+      console.log('Generated audio URL:', mediaUrl);
+    } catch (err) {
+      console.error('Error generating/uploading audio:', err);
       mediaUrl = null;
     }
 
-    // In sandbox, reply via TwiML
+    // In sandbox, reply via TwiML with text and link/media together
     const twiml = new MessagingResponse();
-    const msg = twiml.message();
-    msg.body(text);
     if (mediaUrl) {
+      const msg = twiml.message(`${text}\n\n🔊 Listen: ${mediaUrl}`);
       msg.media(mediaUrl);
+    } else {
+      twiml.message(text);
     }
-    console.log('Sending TwiML:', twiml.toString());
+    console.log('Sending TwiML with media link:', twiml.toString());
     res.writeHead(200, { 'Content-Type': 'text/xml' });
     return res.end(twiml.toString());
   } catch (err) {
