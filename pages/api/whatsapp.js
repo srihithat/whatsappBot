@@ -40,8 +40,23 @@ const ttsClient = new textToSpeech.TextToSpeechClient({
   credentials: ttsCredentials
 });
 const languageMap = {
-  en: 'en-US', hi: 'hi-IN', ta: 'ta-IN', bn: 'bn-IN', mr: 'mr-IN', ml: 'ml-IN'
+  en: 'en-US',
+  hi: 'hi-IN',
+  ta: 'ta-IN',
+  bn: 'bn-IN',
+  mr: 'mr-IN',
+  ml: 'ml-IN',
+  te: 'te-IN',
+  pa: 'pa-IN', // Punjabi
+  gu: 'gu-IN', // Gujarati
+  kn: 'kn-IN', // Kannada
+  or: 'or-IN', // Odia
+  ur: 'ur-IN', // Urdu
+  as: 'as-IN', // Assamese
+  ne: 'ne-IN', // Nepali
+  sa: 'sa-IN'  // Sanskrit
 };
+console.log('Supported languageMap:', languageMap);
 
 // Parse language prefix like 'hi: question' to extract lang code and text
 function parseLanguagePref(raw) {
@@ -160,7 +175,11 @@ export default async function handler(req, res) {
     // In sandbox, reply via TwiML: short text plus audio link
     const twiml = new MessagingResponse();
     if (mediaUrl) {
-      twiml.message(`${shortText}\n\n🔊 Listen here: ${mediaUrl}`);
+      // send brief text with attached audio player
+      const msg = twiml.message(shortText);
+      msg.media(mediaUrl);
+      // also send streaming link in a follow-up message
+      twiml.message(`🔊 Listen here: ${mediaUrl}`);
     } else {
       twiml.message(shortText);
     }
