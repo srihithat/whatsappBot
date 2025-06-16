@@ -1,6 +1,6 @@
 import twilio from 'twilio';
 import { Groq } from "groq-sdk";
-import gTTS from 'gtts';
+import textToSpeech from '@google-cloud/text-to-speech';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
@@ -32,6 +32,12 @@ const client = twilio(
 // Use MessagingResponse for sandbox webhook replies
 const MessagingResponse = twilio.twiml.MessagingResponse;
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY, timeout: 30000 });
+
+// Google TTS client and language mappings
+const ttsClient = new textToSpeech.TextToSpeechClient();
+const languageMap = {
+  en: 'en-US', hi: 'hi-IN', ta: 'ta-IN', bn: 'bn-IN', mr: 'mr-IN', ml: 'ml-IN'
+};
 
 // Parse language prefix like 'hi: question' to extract lang code and text
 function parseLanguagePref(raw) {
@@ -78,37 +84,43 @@ async function getGroqLongResponse(message, language = 'en') {
 
 // Generate audio file in tmp and upload to Cloudinary
 async function generateAudioAndUpload(text, language = 'en') {
-  const filename = `audio_${Date.now()}.mp3`;
-  const tmpDir = os.tmpdir();
-  const filePath = path.join(tmpDir, filename);
-  // generate
-  await new Promise((resolve, reject) => {
-    new gTTS(text, language).save(filePath, err => err ? reject(err) : resolve());
-  });
-  // upload audio privately as authenticated mp3
-  const uploadResult = await cloudinary.uploader.upload(filePath, {
-    resource_type: 'video',
-    folder: 'whatsapp_audio',
-    use_filename: true,
-    unique_filename: false,
-    format: 'mp3',
-    type: 'authenticated'
-  });
-  console.log('Cloudinary private upload result:', uploadResult.public_id);
-  // generate a signed, expiring URL (1 hour)
-  const expiresAt = Math.floor(Date.now() / 1000) + 3600;
-  const signedUrl = cloudinary.url(uploadResult.public_id, {
-    resource_type: 'video',
-    format: 'mp3',
-    type: 'authenticated',
-    sign_url: true,
-    expires_at: expiresAt,
-    secure: true
-  });
-  console.log('Signed streaming audio URL:', signedUrl);
-  // cleanup temp file
-  fs.unlinkSync(filePath);
-  return signedUrl;
+   const filename = `audio_${Date.now()}.mp3`;
+   const tmpDir = os.tmpdir();
+   const filePath = path.join(tmpDir, filename);
+   // synthesize speech with Google Cloud Text-to-Speech
+   const langCode = languageMap[language] || 'en-US';
+   const [response] = await ttsClient.synthesizeSpeech({
+     input: { text },
+     voice: { languageCode: langCode, ssmlGender: 'NEUTRAL' },
+     audioConfig: { audioEncoding: 'MP3' }
+   });
+   // write audio content to file
+   fs.writeFileSync(filePath, response.audioContent, 'binary');
+
+   // upload audio privately as authenticated mp3
+   const uploadResult = await cloudinary.uploader.upload(filePath, {
+     resource_type: 'video',
+     folder: 'whatsapp_audio',
+     use_filename: true,
+     unique_filename: false,
+     format: 'mp3',
+     type: 'authenticated'
+   });
+   console.log('Cloudinary private upload result:', uploadResult.public_id);
+   // generate a signed, expiring URL (1 hour)
+   const expiresAt = Math.floor(Date.now() / 1000) + 3600;
+   const signedUrl = cloudinary.url(uploadResult.public_id, {
+     resource_type: 'video',
+     format: 'mp3',
+     type: 'authenticated',
+     sign_url: true,
+     expires_at: expiresAt,
+     secure: true
+   });
+   console.log('Signed streaming audio URL:', signedUrl);
+   // cleanup temp file
+   fs.unlinkSync(filePath);
+   return signedUrl;
 }
 
 // disable default body parser
