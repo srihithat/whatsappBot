@@ -215,8 +215,23 @@ export default async function handler(req, res) {
   const incoming = params.get('Body') || '';
   const from = params.get('From');
 
-  // Allow users to set language by sending a supported language code (e.g., 'hi', 'ta')
   const incomingTextRaw = incoming.trim().toLowerCase();
+  // If user has not set a language yet and didn't send a code, show interactive list
+  if (!userLanguagePreference.has(from) && !languageMap[incomingTextRaw]) {
+    // Build sections for list message
+    const rows = Object.entries(languageNames).map(([code, name]) => ({ id: code, title: name }));
+    await client.messages.create({
+      from: process.env.TWILIO_WHATSAPP_NUMBER,
+      to: from,
+      interactive: {
+        type: 'list',
+        body: { text: 'Please select your preferred language:' },
+        action: { button: 'Select Language', sections: [{ title: 'Languages', rows }] }
+      }
+    });
+    return res.status(200).send('');
+  }
+  // Now detect if incoming is a language code
   if (languageMap[incomingTextRaw]) {
     userLanguagePreference.set(from, incomingTextRaw);
     const twiml = new MessagingResponse();
