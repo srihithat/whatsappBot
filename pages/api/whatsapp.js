@@ -48,8 +48,8 @@ const client = twilio(
 const MessagingResponse = twilio.twiml.MessagingResponse;
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY, timeout: 30000 });
 
+// Comment out GCP TTS client setup since using Sarvam.ai for non-English
 // Google TTS client and language mappings
-// Initialize Google TTS client: use JSON env var, key file path, or default ADC
 let ttsClient;
 if (process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) {
   try {
