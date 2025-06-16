@@ -216,7 +216,24 @@ export default async function handler(req, res) {
   const from = params.get('From');
 
   const incomingTextRaw = incoming.trim().toLowerCase();
-  // If user has not set a language yet and didn't send a code, show interactive list
+  // Allow user to reset language at any time
+  if (incomingTextRaw === 'change language') {
+    userLanguagePreference.delete(from);
+    // Send language selection list again
+    const rowsReset = Object.entries(languageNames).map(([code, name]) => ({ id: code, title: name }));
+    await client.messages.create({
+      from: process.env.TWILIO_WHATSAPP_NUMBER,
+      to: from,
+      interactive: {
+        type: 'list',
+        body: { text: 'Please select your new preferred language:' },
+        action: { button: 'Select Language', sections: [{ title: 'Languages', rows: rowsReset }] }
+      }
+    });
+    return res.status(200).send('');
+  }
+  
+  // On first interaction or unrecognized code, show language list
   if (!userLanguagePreference.has(from) && !languageMap[incomingTextRaw]) {
     // Build sections for list message
     const rows = Object.entries(languageNames).map(([code, name]) => ({ id: code, title: name }));
