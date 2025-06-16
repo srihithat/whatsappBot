@@ -6,6 +6,7 @@ import os from 'os';
 import path from 'path';
 import twilio from 'twilio';
 import { Groq } from "groq-sdk";
+import getRawBody from 'raw-body';
 
 // Load environment variables from .env file for local development
 dotenv.config();
@@ -157,10 +158,11 @@ async function generateAudioAndUpload(text, language = 'en') {
 
 // disable default body parser
 export const config = { api: { bodyParser: false } };
+// Parse raw request body using raw-body
 async function parseBody(req) {
-  const chunks = [];
-  for await (const chunk of req) chunks.push(chunk);
-  return new URLSearchParams(Buffer.concat(chunks).toString());
+  const length = req.headers['content-length'];
+  const buf = await getRawBody(req, { length, limit: '1mb' });
+  return new URLSearchParams(buf.toString());
 }
 
 export default async function handler(req, res) {
