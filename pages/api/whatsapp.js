@@ -34,11 +34,27 @@ const MessagingResponse = twilio.twiml.MessagingResponse;
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY, timeout: 30000 });
 
 // Google TTS client and language mappings
-// Initialize Google TTS client using credentials JSON from env var
-const ttsCredentials = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON || '{}');
-const ttsClient = new textToSpeech.TextToSpeechClient({
-  credentials: ttsCredentials
-});
+// Initialize Google TTS client: use JSON env var, key file path, or default ADC
+let ttsClient;
+if (process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) {
+  try {
+    const creds = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
+    ttsClient = new textToSpeech.TextToSpeechClient({ credentials: creds });
+    console.log('TTS client initialized with JSON credentials.');
+  } catch (e) {
+    console.error('Invalid JSON in GOOGLE_APPLICATION_CREDENTIALS_JSON:', e);
+  }
+}
+if (!ttsClient && process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+  // fallback to keyFilename path
+  ttsClient = new textToSpeech.TextToSpeechClient({ keyFilename: process.env.GOOGLE_APPLICATION_CREDENTIALS });
+  console.log('TTS client initialized with keyFilename from env.');
+}
+if (!ttsClient) {
+  // fallback to Application Default Credentials
+  ttsClient = new textToSpeech.TextToSpeechClient();
+  console.log('TTS client initialized with default credentials.');
+}
 const languageMap = {
   en: 'en-US',
   hi: 'hi-IN',
