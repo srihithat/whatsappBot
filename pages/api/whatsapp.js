@@ -5,12 +5,23 @@ import path from 'path';
 import fs from 'fs';
 import os from 'os';
 import { v2 as cloudinary } from 'cloudinary';
+import dotenv from 'dotenv';
+
+// Load environment variables from .env file for local development
+dotenv.config();
 
 // Configure Cloudinary
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET
+});
+
+// Debug log to verify Cloudinary env variables
+console.log('Cloudinary config loaded:', {
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET ? '***' : undefined
 });
 
 // Twilio REST client
@@ -49,18 +60,30 @@ async function generateAudioAndUpload(text) {
   await new Promise((resolve, reject) => {
     new gTTS(text, 'en').save(filePath, err => err ? reject(err) : resolve());
   });
-  // upload audio as mp3 so secure_url ends with .mp3
-  const result = await cloudinary.uploader.upload(filePath, {
+  // upload audio privately as authenticated mp3
+  const uploadResult = await cloudinary.uploader.upload(filePath, {
     resource_type: 'video',
     folder: 'whatsapp_audio',
     use_filename: true,
     unique_filename: false,
-    format: 'mp3'
+    format: 'mp3',
+    type: 'authenticated'
   });
-  console.log('Cloudinary upload secure_url:', result.secure_url);
+  console.log('Cloudinary private upload result:', uploadResult.public_id);
+  // generate a signed, expiring URL (1 hour)
+  const expiresAt = Math.floor(Date.now() / 1000) + 3600;
+  const signedUrl = cloudinary.url(uploadResult.public_id, {
+    resource_type: 'video',
+    format: 'mp3',
+    type: 'authenticated',
+    sign_url: true,
+    expires_at: expiresAt,
+    secure: true
+  });
+  console.log('Signed streaming audio URL:', signedUrl);
   // cleanup temp file
   fs.unlinkSync(filePath);
-  return result.secure_url;
+  return signedUrl;
 }
 
 // disable default body parser
@@ -92,8 +115,8 @@ export default async function handler(req, res) {
     // In sandbox, reply via TwiML with text and link/media together
     const twiml = new MessagingResponse();
     if (mediaUrl) {
-      const msg = twiml.message(`${text}\n\n🔊 Listen: ${mediaUrl}`);
-      msg.media(mediaUrl);
+      // Send text with signed streaming URL instead of media attachment
+      twiml.message(`${text}\n\n🔊 Listen here: ${mediaUrl}`);
     } else {
       twiml.message(text);
     }
