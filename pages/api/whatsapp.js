@@ -104,7 +104,8 @@ async function generateAudioAndUpload(text, language = 'en') {
   const filePath = path.join(tmpDir, filename);
   // Use Sarvam.ai with retry for Indian languages
   if (language !== 'en') {
-    let lastErr;
+    let lastErr = null;
+    const locale = languageMap[language] || language;
     for (let i = 0; i < 2; i++) {
       try {
         const res = await fetch('https://api.sarvam.ai/tts', {
@@ -113,8 +114,12 @@ async function generateAudioAndUpload(text, language = 'en') {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${process.env.SARVAM_API_KEY}`
           },
-          body: JSON.stringify({ text, language })
+          body: JSON.stringify({ text, language: locale })
         });
+        if (res.status === 404) {
+          console.warn(`Sarvam.ai TTS unsupported locale: ${locale}`);
+          return null;
+        }
         if (!res.ok) throw new Error(`Sarvam TTS failed: ${res.statusText}`);
         const arrayBuf = await res.arrayBuffer();
         fs.writeFileSync(filePath, Buffer.from(arrayBuf));
@@ -127,7 +132,7 @@ async function generateAudioAndUpload(text, language = 'en') {
     }
     if (lastErr) {
       console.error('All Sarvam.ai TTS attempts failed:', lastErr);
-      throw lastErr;
+      return null;
     }
   }
   // upload audio privately as authenticated mp3
