@@ -123,74 +123,73 @@ async function getGroqLongResponse(message, language = 'en') {
 
 // Generate audio file in tmp and upload to Cloudinary
 async function generateAudioAndUpload(text, language = 'en') {
-    const filename = `audio_${Date.now()}.mp3`;
-    const tmpDir = os.tmpdir();
-    const filePath = path.join(tmpDir, filename);
-   // synthesize speech: try AWS Polly, then Google Cloud TTS, fallback to gTTS
-   try {
-     const langCode = languageMap[language] || 'en-US';
-     // First, try AWS Polly
-     const pollyParams = {
-       OutputFormat: "mp3",
-       Text: text,
-       VoiceId: process.env.AWS_POLLY_VOICE_ID || "Joanna", // Default to Joanna if not specified
-       LanguageCode: langCode
-     };
-     const pollyCommand = new SynthesizeSpeechCommand(pollyParams);
-     const pollyResponse = await pollyClient.send(pollyCommand);
-     // pollyResponse.AudioStream is a Readable stream; buffer it before writing
-     const stream = pollyResponse.AudioStream;
-     const chunks = [];
-     for await (const chunk of stream) {
-       chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-     }
-     const audioBuffer = Buffer.concat(chunks);
-     fs.writeFileSync(filePath, audioBuffer);
-     console.log(`AWS Polly success for lang ${language}`);
-   } catch (err) {
-     console.error(`AWS Polly failed for ${language}, falling back to GCP TTS:`, err);
-     try {
-       const langCode = languageMap[language] || 'en-US';
-       const [response] = await ttsClient.synthesizeSpeech({
-         input: { text },
-         voice: { languageCode: langCode, ssmlGender: 'NEUTRAL' },
-         audioConfig: { audioEncoding: 'MP3' }
-       });
-       fs.writeFileSync(filePath, response.audioContent, 'binary');
-       console.log(`GCP TTS success for lang ${language}`);
-     } catch (err) {
-       console.error(`GCP TTS failed for ${language}, falling back to gTTS:`, err);
-       await new Promise((resolve, reject) => {
-         new gTTS(text, language).save(filePath, err => err ? reject(err) : resolve());
-       });
-       console.log(`gTTS fallback success for lang ${language}`);
-     }
-   }
-
-    // upload audio privately as authenticated mp3
-    const uploadResult = await cloudinary.uploader.upload(filePath, {
-     resource_type: 'video',
-     folder: 'whatsapp_audio',
-     use_filename: true,
-     unique_filename: false,
-     format: 'mp3',
-     type: 'authenticated'
-   });
-   console.log('Cloudinary private upload result:', uploadResult.public_id);
-   // generate a signed, expiring URL (1 hour)
-   const expiresAt = Math.floor(Date.now() / 1000) + 3600;
-   const signedUrl = cloudinary.url(uploadResult.public_id, {
-     resource_type: 'video',
-     format: 'mp3',
-     type: 'authenticated',
-     sign_url: true,
-     expires_at: expiresAt,
-     secure: true
-   });
-   console.log('Signed streaming audio URL:', signedUrl);
-   // cleanup temp file
-   fs.unlinkSync(filePath);
-   return signedUrl;
+  const filename = `audio_${Date.now()}.mp3`;
+  const tmpDir = os.tmpdir();
+  const filePath = path.join(tmpDir, filename);
+  // For non-English languages, use gTTS directly for better accent
+  if (language !== 'en') {
+    console.log(`Using gTTS for ${language} to ensure proper accent`);
+    await new Promise((resolve, reject) => {
+      new gTTS(text, language).save(filePath, err => err ? reject(err) : resolve());
+    });
+    console.log(`gTTS generation success for ${language}`);
+  } else {
+    // synthesize speech: try AWS Polly first, then Google Cloud TTS, fallback to gTTS
+    try {
+      const langCode = languageMap[language] || 'en-US';
+      const pollyParams = {
+        OutputFormat: 'mp3',
+        Text: text,
+        VoiceId: process.env.AWS_POLLY_VOICE_ID || 'Aditi',
+        LanguageCode: langCode
+      };
+      const pollyCommand = new SynthesizeSpeechCommand(pollyParams);
+      const pollyResponse = await pollyClient.send(pollyCommand);
+      // buffer and write
+      const chunks = [];
+      for await (const chunk of pollyResponse.AudioStream) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      fs.writeFileSync(filePath, Buffer.concat(chunks));
+      console.log(`AWS Polly success for ${language}`);
+    } catch (err) {
+      console.error(`AWS Polly failed for ${language}, falling back to GCP TTS:`, err);
+      try {
+        const langCode = languageMap[language] || 'en-US';
+        const [response] = await ttsClient.synthesizeSpeech({ input: { text }, voice: { languageCode: langCode, ssmlGender: 'NEUTRAL' }, audioConfig: { audioEncoding: 'MP3' } });
+        fs.writeFileSync(filePath, response.audioContent, 'binary');
+        console.log(`GCP TTS success for ${language}`);
+      } catch (err) {
+        console.error(`GCP TTS failed for ${language}, falling back to gTTS:`, err);
+        await new Promise((resolve, reject) => {
+          new gTTS(text, language).save(filePath, err => err ? reject(err) : resolve());
+        });
+        console.log(`gTTS fallback success for ${language}`);
+      }
+    }
+  }
+  // upload audio privately as authenticated mp3
+  const uploadResult = await cloudinary.uploader.upload(filePath, {
+    resource_type: 'video',
+    folder: 'whatsapp_audio',
+    use_filename: true,
+    unique_filename: false,
+    format: 'mp3',
+    type: 'authenticated'
+  });
+  console.log('Cloudinary private upload result:', uploadResult.public_id);
+  // generate a signed, expiring URL (1 hour)
+  const expiresAt = Math.floor(Date.now() / 1000) + 3600;
+  const signedUrl = cloudinary.url(uploadResult.public_id, {
+    resource_type: 'video',
+    format: 'mp3',
+    type: 'authenticated',
+    sign_url: true,
+    expires_at: expiresAt,
+    secure: true
+  });
+  console.log('Signed streaming audio URL:', signedUrl);
+  // cleanup temp file
+  fs.unlinkSync(filePath);
+  return signedUrl;
 }
 
 // disable default body parser
@@ -223,17 +222,12 @@ export default async function handler(req, res) {
       console.error('Error generating/uploading audio:', err);
     }
 
-    // In sandbox, reply via TwiML: short text plus audio link
+    // In sandbox, reply via TwiML: concise text with audio link only
     const twiml = new MessagingResponse();
-    if (mediaUrl) {
-      // send brief text with attached audio player
-      const msg = twiml.message(shortText);
-      msg.media(mediaUrl);
-      // also send streaming link in a follow-up message
-      twiml.message(`🔊 Listen here: ${mediaUrl}`);
-    } else {
-      twiml.message(shortText);
-    }
+    const replyText = mediaUrl
+      ? `${shortText}\n\n🔊 Listen here: ${mediaUrl}`
+      : shortText;
+    twiml.message(replyText);
     console.log('Sending TwiML with media link:', twiml.toString());
     res.writeHead(200, { 'Content-Type': 'text/xml' });
     return res.end(twiml.toString());
