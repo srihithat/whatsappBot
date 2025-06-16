@@ -1,6 +1,7 @@
 import twilio from 'twilio';
 import { Groq } from "groq-sdk";
 import textToSpeech from '@google-cloud/text-to-speech';
+import gTTS from 'gtts';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
@@ -119,21 +120,29 @@ async function getGroqLongResponse(message, language = 'en') {
 
 // Generate audio file in tmp and upload to Cloudinary
 async function generateAudioAndUpload(text, language = 'en') {
-   const filename = `audio_${Date.now()}.mp3`;
-   const tmpDir = os.tmpdir();
-   const filePath = path.join(tmpDir, filename);
-   // synthesize speech with Google Cloud Text-to-Speech
-   const langCode = languageMap[language] || 'en-US';
-   const [response] = await ttsClient.synthesizeSpeech({
-     input: { text },
-     voice: { languageCode: langCode, ssmlGender: 'NEUTRAL' },
-     audioConfig: { audioEncoding: 'MP3' }
-   });
-   // write audio content to file
-   fs.writeFileSync(filePath, response.audioContent, 'binary');
+    const filename = `audio_${Date.now()}.mp3`;
+    const tmpDir = os.tmpdir();
+    const filePath = path.join(tmpDir, filename);
+   // synthesize speech: try Google Cloud TTS, fallback to gTTS
+   try {
+     const langCode = languageMap[language] || 'en-US';
+     const [response] = await ttsClient.synthesizeSpeech({
+       input: { text },
+       voice: { languageCode: langCode, ssmlGender: 'NEUTRAL' },
+       audioConfig: { audioEncoding: 'MP3' }
+     });
+     fs.writeFileSync(filePath, response.audioContent, 'binary');
+     console.log(`GCP TTS success for lang ${language}`);
+   } catch (err) {
+     console.error(`GCP TTS failed for ${language}, falling back to gTTS:`, err);
+     await new Promise((resolve, reject) => {
+       new gTTS(text, language).save(filePath, err => err ? reject(err) : resolve());
+     });
+     console.log(`gTTS fallback success for lang ${language}`);
+   }
 
-   // upload audio privately as authenticated mp3
-   const uploadResult = await cloudinary.uploader.upload(filePath, {
+    // upload audio privately as authenticated mp3
+    const uploadResult = await cloudinary.uploader.upload(filePath, {
      resource_type: 'video',
      folder: 'whatsapp_audio',
      use_filename: true,
