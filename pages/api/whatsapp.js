@@ -5,7 +5,6 @@ import os from 'os';
 import path from 'path';
 import twilio from 'twilio';
 import { Groq } from "groq-sdk";
-import gTTS from 'gtts';
 
 // In-memory map to store each user's language preference (no persistence)
 const userLanguagePreference = new Map();
@@ -107,8 +106,9 @@ async function generateAudioAndUpload(text, language = 'en') {
   try {
     // For non-English, try Sarvam.ai then fallback to gTTS
     if (language !== 'en') {
+      // Call Sarvam.ai TTS
+      const locale = languageMap[language] || language;
       try {
-        const locale = languageMap[language] || language;  // e.g., 'hi-IN'
         const res = await fetch('https://api.sarvam.ai/text-to-speech', {
           method: 'POST',
           headers: {
@@ -117,20 +117,12 @@ async function generateAudioAndUpload(text, language = 'en') {
           },
           body: JSON.stringify({ text, target_language_code: locale })
         });
-        if (res.ok) {
-          const arrayBuf = await res.arrayBuffer();
-          fs.writeFileSync(filePath, Buffer.from(arrayBuf));
-        } else {
-          throw new Error(`Sarvam TTS failed (${res.status}): ${res.statusText}`);
-        }
+        if (!res.ok) throw new Error(`Sarvam TTS failed (${res.status}): ${res.statusText}`);
+        const arrayBuf = await res.arrayBuffer();
+        fs.writeFileSync(filePath, Buffer.from(arrayBuf));
       } catch (err) {
-        console.warn('Sarvam.ai TTS error, falling back to gTTS:', err);
-        await new Promise((resolve, reject) => {
-          new gTTS(text, language).save(filePath, (error) => {
-            if (error) reject(error);
-            else resolve();
-          });
-        });
+        console.error('Sarvam.ai TTS error:', err);
+        return null;
       }
     }
     // upload audio privately as authenticated mp3
