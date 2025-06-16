@@ -11,6 +11,17 @@ import dotenv from 'dotenv';
 
 // Load environment variables from .env file for local development
 dotenv.config();
+
+// In-memory map to store each user's language preference (resets on cold start)
+const userLanguagePreference = new Map();
+
+// Human-readable names for supported languages
+const languageNames = {
+  en: 'English', hi: 'Hindi', ta: 'Tamil', bn: 'Bengali', mr: 'Marathi', ml: 'Malayalam',
+  te: 'Telugu', pa: 'Punjabi', gu: 'Gujarati', kn: 'Kannada', or: 'Odia', ur: 'Urdu',
+  as: 'Assamese', ne: 'Nepali', sa: 'Sanskrit'
+};
+
 // Initialize AWS Polly client
 const pollyClient = new PollyClient({ region: process.env.AWS_REGION });
 
@@ -204,11 +215,21 @@ export default async function handler(req, res) {
   const incoming = params.get('Body') || '';
   const from = params.get('From');
 
-  // extract language and clean text
-  const { lang, text: incomingText } = parseLanguagePref(incoming);
+  // Allow users to set language by sending a supported language code (e.g., 'hi', 'ta')
+  const incomingTextRaw = incoming.trim().toLowerCase();
+  if (languageMap[incomingTextRaw]) {
+    userLanguagePreference.set(from, incomingTextRaw);
+    const twiml = new MessagingResponse();
+    twiml.message(`Language set to ${languageNames[incomingTextRaw]}`);
+    res.writeHead(200, { 'Content-Type': 'text/xml' });
+    return res.end(twiml.toString());
+  }
+  // Use previously selected language or default to English
+  const lang = userLanguagePreference.get(from) || 'en';
+  const incomingText = incoming;
 
   try {
-    // Fetch short text for chat and detailed text for audio
+    // Fetch short text for chat and detailed text for audio in selected language
     const shortText = await getGroqResponse(incomingText, lang);
     let mediaUrl = null;
     try {
