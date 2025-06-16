@@ -1,6 +1,7 @@
 import twilio from 'twilio';
 import { Groq } from "groq-sdk";
 import textToSpeech from '@google-cloud/text-to-speech';
+import { PollyClient, SynthesizeSpeechCommand } from '@aws-sdk/client-polly';
 import gTTS from 'gtts';
 import path from 'path';
 import fs from 'fs';
@@ -10,6 +11,8 @@ import dotenv from 'dotenv';
 
 // Load environment variables from .env file for local development
 dotenv.config();
+// Initialize AWS Polly client
+const pollyClient = new PollyClient({ region: process.env.AWS_REGION });
 
 // Configure Cloudinary
 cloudinary.config({
@@ -123,22 +126,38 @@ async function generateAudioAndUpload(text, language = 'en') {
     const filename = `audio_${Date.now()}.mp3`;
     const tmpDir = os.tmpdir();
     const filePath = path.join(tmpDir, filename);
-   // synthesize speech: try Google Cloud TTS, fallback to gTTS
+   // synthesize speech: try AWS Polly, then Google Cloud TTS, fallback to gTTS
    try {
      const langCode = languageMap[language] || 'en-US';
-     const [response] = await ttsClient.synthesizeSpeech({
-       input: { text },
-       voice: { languageCode: langCode, ssmlGender: 'NEUTRAL' },
-       audioConfig: { audioEncoding: 'MP3' }
-     });
-     fs.writeFileSync(filePath, response.audioContent, 'binary');
-     console.log(`GCP TTS success for lang ${language}`);
+     // First, try AWS Polly
+     const pollyParams = {
+       OutputFormat: "mp3",
+       Text: text,
+       VoiceId: process.env.AWS_POLLY_VOICE_ID || "Joanna", // Default to Joanna if not specified
+       LanguageCode: langCode
+     };
+     const pollyCommand = new SynthesizeSpeechCommand(pollyParams);
+     const pollyResponse = await pollyClient.send(pollyCommand);
+     fs.writeFileSync(filePath, pollyResponse.AudioStream);
+     console.log(`AWS Polly success for lang ${language}`);
    } catch (err) {
-     console.error(`GCP TTS failed for ${language}, falling back to gTTS:`, err);
-     await new Promise((resolve, reject) => {
-       new gTTS(text, language).save(filePath, err => err ? reject(err) : resolve());
-     });
-     console.log(`gTTS fallback success for lang ${language}`);
+     console.error(`AWS Polly failed for ${language}, falling back to GCP TTS:`, err);
+     try {
+       const langCode = languageMap[language] || 'en-US';
+       const [response] = await ttsClient.synthesizeSpeech({
+         input: { text },
+         voice: { languageCode: langCode, ssmlGender: 'NEUTRAL' },
+         audioConfig: { audioEncoding: 'MP3' }
+       });
+       fs.writeFileSync(filePath, response.audioContent, 'binary');
+       console.log(`GCP TTS success for lang ${language}`);
+     } catch (err) {
+       console.error(`GCP TTS failed for ${language}, falling back to gTTS:`, err);
+       await new Promise((resolve, reject) => {
+         new gTTS(text, language).save(filePath, err => err ? reject(err) : resolve());
+       });
+       console.log(`gTTS fallback success for lang ${language}`);
+     }
    }
 
     // upload audio privately as authenticated mp3

@@ -12,6 +12,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@aws-sdk/client-polly": "^3.0.0",
     "gtts": "^0.2.1",
     "@google-cloud/text-to-speech": "^4.2.0",
     "cloudinary": "^1.39.0",
