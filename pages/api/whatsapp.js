@@ -138,7 +138,14 @@ async function generateAudioAndUpload(text, language = 'en') {
      };
      const pollyCommand = new SynthesizeSpeechCommand(pollyParams);
      const pollyResponse = await pollyClient.send(pollyCommand);
-     fs.writeFileSync(filePath, pollyResponse.AudioStream);
+     // pollyResponse.AudioStream is a Readable stream; buffer it before writing
+     const stream = pollyResponse.AudioStream;
+     const chunks = [];
+     for await (const chunk of stream) {
+       chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+     }
+     const audioBuffer = Buffer.concat(chunks);
+     fs.writeFileSync(filePath, audioBuffer);
      console.log(`AWS Polly success for lang ${language}`);
    } catch (err) {
      console.error(`AWS Polly failed for ${language}, falling back to GCP TTS:`, err);
