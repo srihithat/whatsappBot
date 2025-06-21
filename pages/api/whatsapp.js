@@ -63,10 +63,11 @@ console.log('Supported languageMap:', languageMap);
 
 // Helper to call GROQ
 async function getGroqResponse(message, language = 'en') {
+  const langName = languageNames[language] || language;
   const completion = await Promise.race([
     groq.chat.completions.create({
       messages: [
-        { role: "system", content: `You are an expert in Indian mythology. Provide brief, engaging 2-3 sentence explanations in ${language}.` },
+        { role: "system", content: `You are an expert in Indian mythology. Provide brief, engaging 2-3 sentence explanations in ${langName}.` },
         { role: "user", content: `Tell me about this Indian mythology topic: ${message}` }
       ],
       model: "llama-3.3-70b-versatile",
@@ -81,10 +82,11 @@ async function getGroqResponse(message, language = 'en') {
 
 // Helper to fetch a detailed response for audio (longer form)
 async function getGroqLongResponse(message, language = 'en') {
+  const langName = languageNames[language] || language;
   const completion = await Promise.race([
     groq.chat.completions.create({
       messages: [
-        { role: "system", content: `You are an expert in Indian mythology. Provide a detailed explanation in 2-3 paragraphs in ${language}, rich with context and storytelling.` },
+        { role: "system", content: `You are an expert in Indian mythology. Provide a detailed explanation in 2-3 paragraphs in ${langName}, rich with context and storytelling.` },
         { role: "user", content: `Please provide a more detailed answer for: ${message}` }
       ],
       model: "llama-3.3-70b-versatile",
@@ -143,29 +145,35 @@ async function generateAudioAndUpload(text, language = 'en') {
     }
   }
   // upload audio privately as authenticated mp3
-  const uploadResult = await cloudinary.uploader.upload(filePath, {
-    resource_type: 'video',
-    folder: 'whatsapp_audio',
-    use_filename: true,
-    unique_filename: false,
-    format: 'mp3',
-    type: 'authenticated'
-  });
-  console.log('Cloudinary private upload result:', uploadResult.public_id);
-  // generate a signed, expiring URL (1 hour)
-  const expiresAt = Math.floor(Date.now() / 1000) + 3600;
-  const signedUrl = cloudinary.url(uploadResult.public_id, {
-    resource_type: 'video',
-    format: 'mp3',
-    type: 'authenticated',
-    sign_url: true,
-    expires_at: expiresAt,
-    secure: true
-  });
-  console.log('Signed streaming audio URL:', signedUrl);
-  // cleanup temp file
-  fs.unlinkSync(filePath);
-  return signedUrl;
+  try {
+    const uploadResult = await cloudinary.uploader.upload(filePath, {
+      resource_type: 'auto',
+      folder: 'whatsapp_audio',
+      use_filename: true,
+      unique_filename: false,
+      format: 'mp3',
+      type: 'authenticated'
+    });
+    console.log('Cloudinary private upload result:', uploadResult.public_id);
+    // generate a signed, expiring URL (1 hour)
+    const expiresAt = Math.floor(Date.now() / 1000) + 3600;
+    const signedUrl = cloudinary.url(uploadResult.public_id, {
+      resource_type: 'auto',
+      format: 'mp3',
+      type: 'authenticated',
+      sign_url: true,
+      expires_at: expiresAt,
+      secure: true
+    });
+    console.log('Signed streaming audio URL:', signedUrl);
+    // cleanup temp file
+    fs.unlinkSync(filePath);
+    return signedUrl;
+  } catch (e) {
+    console.error('Cloudinary upload error:', e);
+    try { fs.unlinkSync(filePath); } catch {};
+    return null;
+  }
 }
 
 // disable default body parser
