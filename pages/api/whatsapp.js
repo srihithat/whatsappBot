@@ -102,29 +102,30 @@ async function generateAudioAndUpload(text, language = 'en') {
   const filename = `audio_${Date.now()}.mp3`;
   const tmpDir = os.tmpdir();
   const filePath = path.join(tmpDir, filename);
-  // Use Sarvam.ai with retry for Indian languages
+  // Use Sarvam.ai TTS with correct locale codes for Indian languages
   if (language !== 'en') {
+    const locale = languageMap[language] || language;
+    console.log('Sarvam.ai TTS locale:', locale);
     let lastErr = null;
-    // Use two-letter language code for Sarvam.ai
     for (let i = 0; i < 2; i++) {
-      console.log(`Sarvam.ai TTS attempt ${i+1} for language ${language}`, { textSnippet: text.slice(0, 50) });
+      console.log(`Sarvam.ai TTS attempt ${i+1} for locale ${locale}`, { textSnippet: text.slice(0, 50) });
       try {
-        const res = await fetch('https://api.sarvam.ai/tts', {
+        const res = await fetch('https://api.sarvam.ai/text-to-speech', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${process.env.SARVAM_API_KEY}`
+            'api-subscription-key': process.env.SARVAM_API_KEY
           },
-          body: JSON.stringify({ "text" : text, 
-                                 "target_language_code" : language,
-                                 "speaker": "karun" })
+          body: JSON.stringify({ text: text, target_language_code: locale,
+                                "speaker": "karun"
+
+           })
         });
         console.log(`Sarvam.ai response status: ${res.status}`);
-        if (res.status === 404) {
-          console.warn(`Sarvam.ai TTS unsupported language: ${language}`);
-          return null;
+        if (!res.ok) {
+          if (res.status === 404) console.warn(`Sarvam.ai TTS unsupported locale: ${locale}`);
+          throw new Error(`Sarvam TTS failed ${res.status}: ${await res.text()}`);
         }
-        if (!res.ok) throw new Error(`Sarvam TTS failed: ${res.statusText}`);
         const arrayBuf = await res.arrayBuffer();
         console.log('Received audio buffer size:', arrayBuf.byteLength);
         fs.writeFileSync(filePath, Buffer.from(arrayBuf));
@@ -137,7 +138,7 @@ async function generateAudioAndUpload(text, language = 'en') {
       }
     }
     if (lastErr) {
-      console.error('All Sarvam.ai TTS attempts failed, returning null for audio');
+      console.error('All Sarvam.ai TTS attempts failed, returning null');
       return null;
     }
   }
