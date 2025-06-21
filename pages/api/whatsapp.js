@@ -43,19 +43,29 @@ const languageMap = {
 // Helper to send WhatsApp messages
 async function sendMessage(to, body) {
   console.log('sendMessage() to=', to, 'body=', body);
-  await fetch(`https://graph.facebook.com/v17.0/${PHONE_ID}/messages`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${TOKEN}`
-    },
-    body: JSON.stringify({
-      messaging_product: 'whatsapp',
-      to,
-      type: 'text',
-      text: { body }
-    })
-  });
+  try {
+    const res = await fetch(`https://graph.facebook.com/v17.0/${PHONE_ID}/messages`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${TOKEN}`
+      },
+      body: JSON.stringify({
+        messaging_product: 'whatsapp',
+        to,
+        type: 'text',
+        text: { body }
+      })
+    });
+    const textRes = await res.text();
+    if (!res.ok) {
+      console.error('sendMessage error:', res.status, textRes);
+    } else {
+      console.log('sendMessage success:', textRes);
+    }
+  } catch (e) {
+    console.error('sendMessage exception:', e);
+  }
 }
 
 // GROQ short answer
