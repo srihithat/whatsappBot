@@ -130,15 +130,22 @@ async function generateAudioAndUpload(text, language = 'en') {
           if (res.status === 404) console.warn(`Sarvam.ai TTS unsupported locale: ${locale}`);
           throw new Error(`Sarvam TTS failed ${res.status}: ${await res.text()}`);
         }
-        const arrayBuf = await res.arrayBuffer();
-        console.log('Received audio buffer size:', arrayBuf.byteLength);
         
-        if (arrayBuf.byteLength === 0) {
-          throw new Error('Received empty audio buffer from Sarvam.ai');
+        const jsonResponse = await res.json();
+        console.log('Sarvam.ai JSON response keys:', Object.keys(jsonResponse));
+        
+        if (!jsonResponse.audios || jsonResponse.audios.length === 0) {
+          throw new Error('No audio data in Sarvam.ai response');
         }
         
-        const buffer = Buffer.from(arrayBuf);
-        fs.writeFileSync(filePath, buffer);
+        // Get the base64 audio string and convert to buffer
+        const base64Audio = jsonResponse.audios[0];
+        console.log('Base64 audio length:', base64Audio.length);
+        
+        const audioBuffer = Buffer.from(base64Audio, 'base64');
+        console.log('Audio buffer size:', audioBuffer.length, 'bytes');
+        
+        fs.writeFileSync(filePath, audioBuffer);
         console.log('Audio file written to:', filePath);
         
         // Verify file exists and has content
