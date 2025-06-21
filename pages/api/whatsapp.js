@@ -225,18 +225,13 @@ async function generateAudioAndUpload(text, language = 'en') {
     console.log('Cloudinary upload result:', uploadResult.public_id);
     console.log('Cloudinary secure_url:', uploadResult.secure_url);
     
-    // Get public URL optimized for audio streaming
-    const audioUrl = cloudinary.url(uploadResult.public_id, {
-      resource_type: 'video',
-      format: 'mp3',
-      secure: true,
-      flags: 'streaming_attachment'
-    });
+    // Use direct secure URL for Twilio compatibility
+    const finalUrl = uploadResult.secure_url;
+    console.log('Final audio URL for Twilio:', finalUrl);
     
-    console.log('Final audio streaming URL:', audioUrl);
     // cleanup temp file
     fs.unlinkSync(filePath);
-    return audioUrl;
+    return finalUrl;
   } catch (e) {
     console.error('Cloudinary upload error:', e);
     try { fs.unlinkSync(filePath); } catch {};
@@ -325,17 +320,44 @@ export default async function handler(req, res) {
        console.error('Error generating/uploading audio:', err);
      }
 
-     // Send text response first
+     // Get Saadhna app hook for text message
+     const hookMessages = {
+       en: "\n\nFor more content, download the Saadhna app! 📱",
+       hi: "\n\nअधिक सामग्री के लिए साधना ऐप डाउनलोड करें! 📱",
+       ta: "\n\nமேலும் உள்ளடக்கத்திற்கு சாதனா ஆப்பைப் பதிவிறக்கவும்! 📱",
+       te: "\n\nమరింత కంటెంట్ కోసం సాధన యాప్‌ను డౌన్‌లోడ్ చేయండి! 📱",
+       bn: "\n\nআরও বিষয়বস্তুর জন্য সাধনা অ্যাপ ডাউনলোড করুন! 📱",
+       mr: "\n\nअधिक मजकुरासाठी साधना अॅप डाउनलोड करा! 📱",
+       ml: "\n\nകൂടുതൽ ഉള്ളടക്കത്തിനായി സാധന ആപ്പ് ഡൗൺലോഡ് ചെയ്യുക! 📱",
+       pa: "\n\nਹੋਰ ਸਮੱਗਰੀ ਲਈ ਸਾਧਨਾ ਐਪ ਡਾਊਨਲੋਡ ਕਰੋ! 📱",
+       gu: "\n\nવધુ સામગ્રી માટે સાધના એપ ડાઉનલોડ કરો! 📱",
+       kn: "\n\nಹೆಚ್ಚಿನ ವಿಷಯಗಳಿಗಾಗಿ ಸಾಧನಾ ಅಪ್ಲಿಕೇಶನ್ ಡೌನ್‌ಲೋಡ್ ಮಾಡಿ! 📱",
+       or: "\n\nଅଧିକ ବିଷୟବସ୍ତୁ ପାଇଁ ସାଧନା ଆପ୍ ଡାଉନଲୋଡ୍ କରନ୍ତୁ! 📱",
+       ur: "\n\nمزید مواد کے لیے سادھنا ایپ ڈاؤن لوڈ کریں! 📱",
+       as: "\n\nঅধিক বিষয়বস্তুৰ বাবে সাধনা এপ ডাউনলোড কৰক! 📱",
+       ne: "\n\nथप सामग्रीको लागि साधना एप डाउनलोड गर्नुहोस्! 📱",
+       sa: "\n\nअधिकविषयस्य कृते साधना एप् अवतारयतु! 📱"
+     };
+     
+     const textHook = hookMessages[lang] || hookMessages.en;
+     const fullTextResponse = shortText + textHook;
+
+     // Send text response first, then voice note as separate message
      const twiml = new MessagingResponse();
-     twiml.message(shortText);
+     
+     // Always send text message
+     twiml.message(fullTextResponse);
      
      // Send voice note as separate message if audio was generated
      if (mediaUrl) {
+       console.log('Adding voice note to TwiML with URL:', mediaUrl);
        const voiceMessage = twiml.message();
        voiceMessage.media(mediaUrl);
+     } else {
+       console.log('No audio URL generated, skipping voice note');
      }
      
-     console.log('Sending TwiML with voice note:', twiml.toString());
+     console.log('Sending TwiML response:', twiml.toString());
      res.setHeader('Content-Type', 'text/xml');
      return res.status(200).send(twiml.toString());
    } catch (err) {
