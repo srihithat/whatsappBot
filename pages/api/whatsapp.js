@@ -1,5 +1,4 @@
 import { v2 as cloudinary } from 'cloudinary';
-import db from '../../lib/db';
 import dotenv from 'dotenv';
 import fs from 'fs';
 import os from 'os';
@@ -10,6 +9,9 @@ import getRawBody from 'raw-body';
 
 // Load environment variables from .env file for local development
 dotenv.config();
+
+// In-memory user language preferences (persists during server lifetime)
+const userLanguagePrefs = new Map();
 
 // Configure Cloudinary
 cloudinary.config({
@@ -147,28 +149,18 @@ async function generateAudioAndUpload(text, language = 'en') {
   // upload audio privately as authenticated mp3
   try {
     const uploadResult = await cloudinary.uploader.upload(filePath, {
-      resource_type: 'auto',
+      resource_type: 'raw',
       folder: 'whatsapp_audio',
       use_filename: true,
       unique_filename: false,
-      format: 'mp3',
-      type: 'authenticated'
+      public_id: `audio_${Date.now()}`,
+      type: 'upload'
     });
-    console.log('Cloudinary private upload result:', uploadResult.public_id);
-    // generate a signed, expiring URL (1 hour)
-    const expiresAt = Math.floor(Date.now() / 1000) + 3600;
-    const signedUrl = cloudinary.url(uploadResult.public_id, {
-      resource_type: 'auto',
-      format: 'mp3',
-      type: 'authenticated',
-      sign_url: true,
-      expires_at: expiresAt,
-      secure: true
-    });
-    console.log('Signed streaming audio URL:', signedUrl);
+    console.log('Cloudinary upload result:', uploadResult.public_id);
+    console.log('Cloudinary secure_url:', uploadResult.secure_url);
     // cleanup temp file
     fs.unlinkSync(filePath);
-    return signedUrl;
+    return uploadResult.secure_url;
   } catch (e) {
     console.error('Cloudinary upload error:', e);
     try { fs.unlinkSync(filePath); } catch {};
@@ -186,23 +178,22 @@ async function parseBody(req) {
 }
 
 export default async function handler(req, res) {
-  // Ensure database is loaded
-  await db.read();
-  // Initialize persistence object if missing
-  db.data ||= { userLang: {} };
-
   if (req.method === 'GET') return res.status(200).send('WhatsApp bot running');
   const params = await parseBody(req);
   const incoming = params.get('Body') || '';
   const from = params.get('From');
   const incomingTextRaw = incoming.trim().toLowerCase();
 
+  console.log('Handler request from:', from, 'message:', incoming);
+  console.log('Current user languages in memory:', Object.fromEntries(userLanguagePrefs));
+  console.log('Saved language for this user:', userLanguagePrefs.get(from));
+
   // Help command
   if (incomingTextRaw === 'help' || incomingTextRaw === 'menu') {
     const options = Object.entries(languageNames)
       .map(([code, name], idx) => `${idx + 1}. ${name}`)
       .join('\n');
-    const helpText = `Welcome to the Indian Mythology Bot!\n- Select language by number:\n${options}\n- Ask any question to get answers in your language.\n- Type 'change language' to switch.\n- Type 'help' to see this message.`;
+    const helpText = `Welcome to the Indian Mythology Bot!\n- Select language by number:\n${options}\n- Ask any question to get answers in your language.\n- Type 'change language', 'reset', or 'reset language' to switch.\n- Type 'help' to see this message.`;
     const twimlHelp = new MessagingResponse();
     twimlHelp.message(helpText);
     res.setHeader('Content-Type', 'text/xml');
@@ -210,9 +201,8 @@ export default async function handler(req, res) {
   }
 
   // 1) Reset language if requested
-  if (incomingTextRaw === 'change language') {
-    delete db.data.userLang[from];
-    await db.write();
+  if (incomingTextRaw === 'change language' || incomingTextRaw === 'reset' || incomingTextRaw === 'reset language') {
+    userLanguagePrefs.delete(from);
     const twimlReset = new MessagingResponse();
     twimlReset.message('Language cleared. Please select a new language.');
     res.setHeader('Content-Type', 'text/xml');
@@ -220,14 +210,13 @@ export default async function handler(req, res) {
   }
 
   // 2) If no saved preference, handle numeric selection or show menu
-  if (!db.data.userLang[from]) {
+  if (!userLanguagePrefs.has(from)) {
      // try numeric selection
      const langKeys = Object.keys(languageNames);
      const num = parseInt(incomingTextRaw, 10);
      if (!isNaN(num) && num >= 1 && num <= langKeys.length) {
        const code = langKeys[num - 1];
-       db.data.userLang[from] = code;
-       await db.write();
+       userLanguagePrefs.set(from, code);
        const twimlSel = new MessagingResponse();
        twimlSel.message(`Language set to ${languageNames[code]}`);
        res.setHeader('Content-Type', 'text/xml');
@@ -244,7 +233,7 @@ export default async function handler(req, res) {
      return res.status(200).send(twimlMenu.toString());
    }
    // 3) use saved preference
-   const lang = db.data.userLang[from] || 'en';
+   const lang = userLanguagePrefs.get(from) || 'en';
    const incomingText = incoming;
 
    try {
