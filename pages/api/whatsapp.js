@@ -69,12 +69,12 @@ async function getGroqResponse(message, language = 'en') {
   const completion = await Promise.race([
     groq.chat.completions.create({
       messages: [
-        { role: "system", content: `You are an expert in Indian mythology. Provide brief, engaging 2-3 sentence explanations in ${langName}.` },
+        { role: "system", content: `You are an expert in Indian mythology. Provide comprehensive, engaging explanations in ${langName}. For detailed topics like chapters or stories, provide substantial content.` },
         { role: "user", content: `Tell me about this Indian mythology topic: ${message}` }
       ],
       model: "llama-3.3-70b-versatile",
       temperature: 0.7,
-      max_tokens: 200,
+      max_tokens: 800,
       top_p: 1,
     }),
     new Promise((_, reject) => setTimeout(() => reject(new Error('GROQ request timeout')), 25000))
@@ -85,20 +85,56 @@ async function getGroqResponse(message, language = 'en') {
 // Helper to fetch a detailed response for audio (longer form)
 async function getGroqLongResponse(message, language = 'en') {
   const langName = languageNames[language] || language;
+  
+  // Check if this is a request for detailed content (chapters, stories, etc.)
+  const isDetailedRequest = /\b(chapter|story|tale|episode|part|full|complete|detail|narrate|tell me about|explain in detail)\b.*\b(ramayana|mahabharata|bhagavata|purana|gita)\b/i.test(message) 
+    || /\b(chapter|canto|book|part)\s*\d+/i.test(message)
+    || /\b(full story|complete story|detailed story|long story)\b/i.test(message);
+  
+  console.log(`Long audio request - isDetailed: ${isDetailedRequest}, message: "${message}"`);
+  
+  const maxTokens = isDetailedRequest ? 3000 : 800;
+  const systemPrompt = isDetailedRequest 
+    ? `You are a master storyteller of Indian mythology. When asked about chapters, stories, or detailed topics, provide comprehensive narration with rich descriptions, dialogue, character development, and cultural context. Create engaging, extensive content suitable for 20-30 minutes of audio narration in ${langName}.`
+    : `You are an expert in Indian mythology. Provide detailed explanations (3-5 minutes worth) with context and storytelling in ${langName}.`;
+  
   const completion = await Promise.race([
     groq.chat.completions.create({
       messages: [
-        { role: "system", content: `You are an expert in Indian mythology. Provide a detailed explanation in 2-3 paragraphs in ${langName}, rich with context and storytelling.` },
-        { role: "user", content: `Please provide a more detailed answer for: ${message}` }
+        { role: "system", content: systemPrompt },
+        { role: "user", content: `Please provide a comprehensive answer for: ${message}` }
       ],
       model: "llama-3.3-70b-versatile",
       temperature: 0.8,
-      max_tokens: 600,
+      max_tokens: maxTokens,
       top_p: 1,
     }),
-    new Promise((_, reject) => setTimeout(() => reject(new Error('GROQ long request timeout')), 45000))
+    new Promise((_, reject) => setTimeout(() => reject(new Error('GROQ long request timeout')), 60000))
   ]);
-  return completion.choices[0].message.content;
+  
+  // Add Saadhna app hook to the content
+  const hookMessages = {
+    en: "\n\nFor more such enriching content on Indian mythology and spirituality, please download the Saadhna app.",
+    hi: "\n\nभारतीय पुराण और अध्यात्म पर ऐसी और समृद्ध सामग्री के लिए, कृपया साधना ऐप डाउनलोड करें।",
+    ta: "\n\nஇந்திய புராணங்கள் மற்றும் ஆன்மீகம் பற்றிய இதுபோன்ற வளமான உள்ளடக்கத்திற்கு, தயவுசெய்து சாதனா ஆப்பைப் பதிவிறக்கவும்।",
+    te: "\n\nభారతీయ పురాణాలు మరియు ఆధ్యాత్మికత గురించి ఇలాంటి సమృద్ధమైన కంటెంట్ కోసం, దయచేసి సాధన యాప్‌ను డౌన్‌లోడ్ చేయండి।",
+    bn: "\n\nভারতীয় পুরাণ এবং আধ্যাত্মিকতার উপর এই ধরনের সমৃদ্ধ বিষয়বস্তুর জন্য, অনুগ্রহ করে সাধনা অ্যাপ ডাউনলোড করুন।",
+    mr: "\n\nभारतीय पुराण आणि अध्यात्म यावर अशा समृद्ध मजकुरासाठी, कृपया साधना अॅप डाउनलोड करा।",
+    ml: "\n\nഇന്ത്യൻ പുരാണങ്ങളെയും ആധ്യാത്മികതയെയും കുറിച്ചുള്ള ഇത്തരം സമ്പന്നമായ ഉള്ളടക്കത്തിനായി, ദയവായി സാധന ആപ്പ് ഡൗൺലോഡ് ചെയ്യുക।",
+    pa: "\n\nਭਾਰਤੀ ਪੁਰਾਣਾਂ ਅਤੇ ਅਧਿਆਤਮ ਬਾਰੇ ਅਜਿਹੀ ਭਰਪੂਰ ਸਮੱਗਰੀ ਲਈ, ਕਿਰਪਾ ਕਰਕੇ ਸਾਧਨਾ ਐਪ ਡਾਊਨਲੋਡ ਕਰੋ।",
+    gu: "\n\nભારતીય પુરાણો અને આધ્યાત્મિકતા પર આવી સમૃદ્ધ સામગ્રી માટે, કૃપા કરીને સાધના એપ ડાઉનલોડ કરો।",
+    kn: "\n\nಭಾರತೀಯ ಪುರಾಣಗಳು ಮತ್ತು ಆಧ್ಯಾತ್ಮಿಕತೆಯ ಬಗ್ಗೆ ಅಂತಹ ಸಮೃದ್ಧ ವಿಷಯಗಳಿಗಾಗಿ, ದಯವಿಟ್ಟು ಸಾಧನಾ ಅಪ್ಲಿಕೇಶನ್ ಅನ್ನು ಡೌನ್‌ಲೋಡ್ ಮಾಡಿ।",
+    or: "\n\nଭାରତୀୟ ପୁରାଣ ଏବଂ ଆଧ୍ୟାତ୍ମିକତା ଉପରେ ଏପରି ସମୃଦ୍ଧ ବିଷୟବସ୍ତୁ ପାଇଁ, ଦୟାକରି ସାଧନା ଆପ୍ ଡାଉନଲୋଡ୍ କରନ୍ତୁ।",
+    ur: "\n\nبھارتی پرانوں اور روحانیت پر اس طرح کے بھرپور مواد کے لیے، براہ کرم سادھنا ایپ ڈاؤن لوڈ کریں۔",
+    as: "\n\nভাৰতীয় পুৰাণ আৰু আধ্যাত্মিকতাৰ ওপৰত এনেধৰণৰ সমৃদ্ধ বিষয়বস্তুৰ বাবে, অনুগ্ৰহ কৰি সাধনা এপ ডাউনলোড কৰক।",
+    ne: "\n\nभारतीय पुराण र अध्यात्म मा यस्तै समृद्ध सामग्रीको लागि, कृपया साधना एप डाउनलोड गर्नुहोस्।",
+    sa: "\n\nभारतीयपुराणेषु अध्यात्मे च एतादृशस्य समृद्धस्य विषयस्य कृते कृपया साधना एप् अवतारयतु।"
+  };
+  
+  const content = completion.choices[0].message.content;
+  const hook = hookMessages[language] || hookMessages.en;
+  
+  return content + hook;
 }
 
 // Generate audio file in tmp and upload to Cloudinary
