@@ -289,13 +289,17 @@ export default async function handler(req, res) {
        console.error('Error generating/uploading audio:', err);
      }
 
-     // In sandbox, reply via TwiML: concise text with audio link only
+     // Send text response first
      const twiml = new MessagingResponse();
-     const replyText = mediaUrl
-       ? `${shortText}\n\n🔊 Listen here: ${mediaUrl}`
-       : shortText;
-     twiml.message(replyText);
-     console.log('Sending TwiML with media link:', twiml.toString());
+     twiml.message(shortText);
+     
+     // Send voice note as separate message if audio was generated
+     if (mediaUrl) {
+       const voiceMessage = twiml.message();
+       voiceMessage.media(mediaUrl);
+     }
+     
+     console.log('Sending TwiML with voice note:', twiml.toString());
      res.setHeader('Content-Type', 'text/xml');
      return res.status(200).send(twiml.toString());
    } catch (err) {
