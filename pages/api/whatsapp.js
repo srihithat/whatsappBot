@@ -163,7 +163,7 @@ async function generateAudioAndUpload(text, language = 'en') {
       return null;
     }
   }
-  // upload audio privately as authenticated mp3
+  // upload audio as public mp3 for WhatsApp compatibility
   try {
     // Double-check file exists before upload
     if (!fs.existsSync(filePath)) {
@@ -173,18 +173,27 @@ async function generateAudioAndUpload(text, language = 'en') {
     
     console.log('Uploading audio file to Cloudinary:', filePath);
     const uploadResult = await cloudinary.uploader.upload(filePath, {
-      resource_type: 'raw',
+      resource_type: 'video',
       folder: 'whatsapp_audio',
-      use_filename: true,
-      unique_filename: false,
-      public_id: `audio_${Date.now()}`,
-      type: 'upload'
+      format: 'mp3',
+      type: 'upload',
+      overwrite: true
     });
     console.log('Cloudinary upload result:', uploadResult.public_id);
     console.log('Cloudinary secure_url:', uploadResult.secure_url);
+    
+    // Get public URL optimized for audio streaming
+    const audioUrl = cloudinary.url(uploadResult.public_id, {
+      resource_type: 'video',
+      format: 'mp3',
+      secure: true,
+      flags: 'streaming_attachment'
+    });
+    
+    console.log('Final audio streaming URL:', audioUrl);
     // cleanup temp file
     fs.unlinkSync(filePath);
-    return uploadResult.secure_url;
+    return audioUrl;
   } catch (e) {
     console.error('Cloudinary upload error:', e);
     try { fs.unlinkSync(filePath); } catch {};
