@@ -132,8 +132,25 @@ async function generateAudioAndUpload(text, language = 'en') {
         }
         const arrayBuf = await res.arrayBuffer();
         console.log('Received audio buffer size:', arrayBuf.byteLength);
-        fs.writeFileSync(filePath, Buffer.from(arrayBuf));
+        
+        if (arrayBuf.byteLength === 0) {
+          throw new Error('Received empty audio buffer from Sarvam.ai');
+        }
+        
+        const buffer = Buffer.from(arrayBuf);
+        fs.writeFileSync(filePath, buffer);
         console.log('Audio file written to:', filePath);
+        
+        // Verify file exists and has content
+        if (!fs.existsSync(filePath)) {
+          throw new Error('Audio file was not created successfully');
+        }
+        const stats = fs.statSync(filePath);
+        console.log('Created file size:', stats.size, 'bytes');
+        
+        if (stats.size === 0) {
+          throw new Error('Created audio file is empty');
+        }
         lastErr = null;
         break;
       } catch (err) {
@@ -148,6 +165,13 @@ async function generateAudioAndUpload(text, language = 'en') {
   }
   // upload audio privately as authenticated mp3
   try {
+    // Double-check file exists before upload
+    if (!fs.existsSync(filePath)) {
+      console.error('Audio file does not exist at upload time:', filePath);
+      return null;
+    }
+    
+    console.log('Uploading audio file to Cloudinary:', filePath);
     const uploadResult = await cloudinary.uploader.upload(filePath, {
       resource_type: 'raw',
       folder: 'whatsapp_audio',
